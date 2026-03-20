@@ -1,5 +1,15 @@
+//
+//  MarkdownEditorView.swift
+//  Fold
+//
+//  Created by Stephane Curzi on 2026-03-19.
+//
+
+
 import SwiftUI
 import AppKit
+
+// MarkdownTextStorage est défini dans MarkdownTextStorage.swift
 
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
@@ -29,7 +39,6 @@ struct MarkdownEditorView: NSViewRepresentable {
         scroll.drawsBackground       = false
         scroll.hasHorizontalScroller = false
         scroll.documentView          = textView
-
         textView.minSize             = NSSize(width: 0, height: scroll.contentSize.height)
         textView.maxSize             = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                               height: CGFloat.greatestFiniteMagnitude)
@@ -43,35 +52,28 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let tv = scroll.documentView as? NSTextView else { return }
-        // Met à jour le tagColorProvider si changé
-        if let storage = tv.textStorage as? MarkdownTextStorage {
-            storage.tagColorProvider = tagColorProvider
-            // Force re-highlight si le provider change
-            storage.edited(.editedAttributes, range: NSRange(location: 0, length: storage.length), changeInLength: 0)
-        }
+        if let s = tv.textStorage as? MarkdownTextStorage { s.tagColorProvider = tagColorProvider }
         guard tv.string != text else { return }
         let sel = tv.selectedRange()
         tv.string = text
-        let safeLoc = min(sel.location, (text as NSString).length)
-        tv.setSelectedRange(NSRange(location: safeLoc, length: 0))
+        tv.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
     }
 
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
         weak var textView: FoldTextView?
-
-        init(_ parent: MarkdownEditorView) { self.parent = parent }
-
-        func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
+        init(_ p: MarkdownEditorView) { parent = p }
+        func textDidChange(_ n: Notification) {
+            guard let tv = n.object as? NSTextView else { return }
             parent.text = tv.string
             parent.onTextChange(tv.string)
         }
     }
 }
 
-final class FoldTextView: NSTextView {
+// MARK: - FoldTextView
 
+final class FoldTextView: NSTextView {
     func configure() {
         isRichText                            = false
         allowsUndo                            = true
@@ -81,8 +83,7 @@ final class FoldTextView: NSTextView {
         isAutomaticDashSubstitutionEnabled    = false
         isAutomaticLinkDetectionEnabled       = false
         isAutomaticSpellingCorrectionEnabled  = false
-        isGrammarCheckingEnabled              = false
-        isContinuousSpellCheckingEnabled      = true
+        isContinuousSpellCheckingEnabled      = false
         usesFontPanel                         = false
         textContainerInset                    = NSSize(width: 70, height: 50)
         backgroundColor                       = .textBackgroundColor
@@ -107,8 +108,8 @@ final class FoldTextView: NSTextView {
         let text = string as NSString
         let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
         let line = text.substring(with: lineRange)
-        guard let rx = try? NSRegularExpression(pattern: #"^#{1,6}[ \t]"#),
-              rx.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
+        guard let rxObj = try? NSRegularExpression(pattern: #"^#{1,6}[ \t]"#),
+              rxObj.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
         else { return }
         let lineStart = lineRange.location
         if storage.foldedHeadings.contains(lineStart) {

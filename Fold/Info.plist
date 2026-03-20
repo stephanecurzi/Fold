@@ -5,23 +5,30 @@
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
+			<key>CFBundleTypeIconSystemGenerated</key>
+			<true/>
 			<key>CFBundleTypeName</key>
 			<string>Fold Document</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
-			<string>Default</string>
+			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.fold.markdown</string>
+				<string>public.plain-text</string>
 			</array>
 			<key>NSUbiquitousDocumentUserActivityType</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).exampledocument</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).document</string>
 		</dict>
 	</array>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.plain-text</string>
+			</array>
 			<key>UTTypeDescription</key>
 			<string>Fold Document</string>
 			<key>UTTypeIcons</key>
@@ -33,6 +40,11 @@
 				<key>public.filename-extension</key>
 				<array>
 					<string>md</string>
+					<string>txt</string>
+					<string>markdown</string>
+					<string>text</string>
+					<string>mdown</string>
+					<string>mkd</string>
 				</array>
 			</dict>
 		</dict>

@@ -5,15 +5,40 @@ struct ContentView: View {
     @ObservedObject var document: FoldDocument
     @Environment(FolderStore.self) var folderStore
     @Environment(TagStore.self) var tagStore
+    @Environment(PreferencesStore.self) var prefs
+
+    @State private var activeTag: String? = nil
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+
+    private var currentTags: [String] {
+        TagStore.extract(from: document.text)
+    }
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240)
+        NavigationSplitView(columnVisibility: $columnVisibility) {
+            SidebarView(
+                currentDocumentTags: currentTags,
+                activeTag: $activeTag
+            )
+            .navigationSplitViewColumnWidth(min: 200, ideal: 240)
         } detail: {
-            TextEditorView(document: document)
+            TextEditorView(
+                document: document,
+                activeTag: $activeTag
+            )
         }
         .environment(folderStore)
         .environment(tagStore)
+        .environment(prefs)
+        .tint(.orange)
+        .onAppear {
+            columnVisibility = .detailOnly
+            activeTag = nil
+        }
+        .onChange(of: currentTags) { _, tags in
+            if let active = activeTag, !tags.contains(active) {
+                activeTag = nil
+            }
+        }
     }
 }

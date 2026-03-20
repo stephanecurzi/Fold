@@ -5,13 +5,18 @@ final class MarkdownTextStorage: NSTextStorage {
     private let backing = NSMutableAttributedString()
     private static var rxCache: [String: NSRegularExpression] = [:]
 
-    static let fontSize: CGFloat = 16
-    static var body: NSFont { .systemFont(ofSize: fontSize) }
-
-    var foldedHeadings: Set<Int> = []
-
-    // TagStore injecté pour les couleurs
+    // Injecté depuis TextEditorView
+    var preferences: PreferencesStore? = nil
     var tagColorProvider: ((String) -> NSColor)? = nil
+    var activeTag: String? = nil
+    var foldedHeadings: Set<Int> = []
+    var currentTagColors: [String: String]? = nil  // Pour détecter les changements
+
+    // MARK: - Fonts
+
+    private var fontSize: CGFloat { preferences?.fontSize ?? 16 }
+    private var bodyFont: NSFont  { preferences?.bodyFont ?? .systemFont(ofSize: fontSize) }
+    private var monoFont: NSFont  { .monospacedSystemFont(ofSize: fontSize - 1, weight: .regular) }
 
     // MARK: - Primitives
 
@@ -58,7 +63,7 @@ final class MarkdownTextStorage: NSTextStorage {
 
         applyInline(text: text, in: full)
         applyTagLineColors(text: text)
-        applyFolding(text: text)
+        applyActiveTagHighlight(text: text)
     }
 
     // MARK: - Block Elements
@@ -68,79 +73,119 @@ final class MarkdownTextStorage: NSTextStorage {
         guard len > 0 else { return }
         let lineRange = NSRange(location: 0, length: len)
 
+        // ── Headings ──────────────────────────────────
         if let m = rx(#"^(#{1,6})([ \t]+)(.*)$"#).firstMatch(in: line, range: lineRange) {
             let level  = m.range(at: 1).length
             let hidden = m.range(at: 1).length + m.range(at: 2).length
             let textLn = m.range(at: 3).length
             hide(at: offset, length: hidden)
             if textLn > 0 {
-                backing.addAttribute(.font, value: headingFont(level),
+                let font = preferences?.headingFont(level: level) ?? headingFont(level)
+                backing.addAttribute(.font, value: font,
                                      range: NSRange(location: offset + hidden, length: textLn))
             }
             return
         }
 
+        // ── HR — affiché comme ligne visible ──────────
+        if rx(#"^(---+|\*\*\*+|___+)\s*$"#).firstMatch(in: line, range: lineRange) != nil {
+            backing.addAttributes([
+                .foregroundColor: NSColor.separatorColor,
+                .font: NSFont.systemFont(ofSize: 4),
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                .strikethroughColor: NSColor.separatorColor
+            ], range: NSRange(location: offset, length: len))
+            return
+        }
+
+        // ── Blockquote — italique + indentation ───────
         if let m = rx(#"^(>[ \t]?)(.*)$"#).firstMatch(in: line, range: lineRange) {
             let pLen = m.range(at: 1).length
             let tLen = m.range(at: 2).length
             hide(at: offset, length: pLen)
             if tLen > 0 {
+                let ps = NSMutableParagraphStyle()
+                ps.headIndent    = 20
+                ps.firstLineHeadIndent = 20
+                ps.lineSpacing   = 5
                 backing.addAttributes([
                     .foregroundColor: NSColor.secondaryLabelColor,
-                    .font: Self.body.italic()
+                    .font: italicFont(),
+                    .paragraphStyle: ps
                 ], range: NSRange(location: offset + pLen, length: tLen))
             }
             return
         }
 
-        if rx(#"^(---+|\*\*\*+|___+)\s*$"#).firstMatch(in: line, range: lineRange) != nil {
-            hide(at: offset, length: len)
-            return
-        }
-
+        // ── Listes — couleur labelColor par défaut ────
         if let m = rx(#"^(\s*)([-*+])([ \t])"#).firstMatch(in: line, range: lineRange) {
-            backing.addAttribute(.foregroundColor, value: NSColor.systemBlue,
+            backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location, length: 1))
         }
 
         if let m = rx(#"^(\s*)(\d+\.)([ \t])"#).firstMatch(in: line, range: lineRange) {
-            backing.addAttribute(.foregroundColor, value: NSColor.systemBlue,
+            backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location,
                                                 length: m.range(at: 2).length))
+        }
+
+        // ── Checkbox ──────────────────────────────────
+        if rx(#"^(\s*- \[x\] )"#).firstMatch(in: line, range: lineRange) != nil {
+            backing.addAttributes([
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                .foregroundColor: NSColor.tertiaryLabelColor
+            ], range: NSRange(location: offset, length: len))
+        }
+
+        // ── Bloc de code (``` ... ```) ─────────────────
+        if rx(#"^```"#).firstMatch(in: line, range: lineRange) != nil {
+            backing.addAttributes([
+                .font: monoFont,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ], range: NSRange(location: offset, length: len))
         }
     }
 
     // MARK: - Inline Elements
 
     private func applyInline(text: String, in full: NSRange) {
+        // Bold + Italic
         inline(#"\*\*\*(.+?)\*\*\*"#, text, full, attrs: [.font: boldItalicFont()])
-        inline(#"\*\*(.+?)\*\*"#, text, full, attrs: [.font: NSFont.boldSystemFont(ofSize: Self.fontSize)])
-        inline(#"(?<![*_])\*([^*\n]+)\*(?![*_])"#, text, full, attrs: [.font: Self.body.italic()])
+        // Bold
+        inline(#"\*\*(.+?)\*\*"#, text, full, attrs: [.font: boldFont()])
+        // Italic
+        inline(#"(?<![*_])\*([^*\n]+)\*(?![*_])"#, text, full, attrs: [.font: italicFont()])
+        // Code inline — monospace
         inline(#"`([^`\n]+)`"#, text, full, attrs: [
-            .font: NSFont.monospacedSystemFont(ofSize: Self.fontSize - 1, weight: .regular),
-            .foregroundColor: NSColor.systemGreen
+            .font: monoFont,
+            .foregroundColor: NSColor.systemGreen,
+            .backgroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.06)
         ])
+        // Strikethrough
         inline(#"~~(.+?)~~"#, text, full, attrs: [
             .strikethroughStyle: NSUnderlineStyle.single.rawValue,
             .foregroundColor: NSColor.secondaryLabelColor
         ])
-        inlineLinks(text, full)
-
-        // @tags : toujours en gris tertiaire
-        inlineAll(#"@[\w]+"#, text, full, attrs: [
-            .foregroundColor: NSColor.tertiaryLabelColor,
-            .font: NSFont.systemFont(ofSize: Self.fontSize)
+        // Highlight ==texte==
+        inline(#"==(.+?)=="#, text, full, attrs: [
+            .backgroundColor: NSColor.systemOrange.withAlphaComponent(0.3)
         ])
-
+        // Links
+        inlineLinks(text, full)
+        // @tags gris tertiaire
+        inlineAll(#"@[\w]+"#, text, full, attrs: [
+            .foregroundColor: NSColor.tertiaryLabelColor
+        ])
+        // #hashtags
         inlineHashtags(text)
     }
 
-    // MARK: - Colorisation des lignes par @tag
+    // MARK: - Tag line colors
 
     private func applyTagLineColors(text: String) {
         guard let provider = tagColorProvider else { return }
         let pattern = #"@(\w+)(?=\s*[.!?]?\s*$)"#
-        guard let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
+        guard let tagRx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
 
         let lines = text.components(separatedBy: "\n")
         var offset = 0
@@ -149,21 +194,39 @@ final class MarkdownTextStorage: NSTextStorage {
             let lineLen = (line as NSString).length
             let lineRange = NSRange(location: 0, length: lineLen)
 
-            if let m = rx.firstMatch(in: line, range: lineRange),
+            if let m = tagRx.firstMatch(in: line, range: lineRange),
                let tagRange = Range(m.range(at: 1), in: line) {
                 let tagName = String(line[tagRange]).lowercased()
-                let color = provider(tagName)
-
-                // Colorie toute la ligne sauf le @tag lui-même
+                let color   = provider(tagName)
                 let fullLineRange = NSRange(location: offset, length: lineLen)
-                let tagNSRange = NSRange(location: offset + m.range(at: 0).location,
-                                        length: m.range(at: 0).length)
+                let tagNSRange   = NSRange(location: offset + m.range(at: 0).location,
+                                           length: m.range(at: 0).length)
 
-                // Ligne en couleur du tag
                 if valid(fullLineRange) {
                     backing.addAttribute(.foregroundColor, value: color, range: fullLineRange)
+
+                    // @done = texte barré
+                    if TagStore.isDoneTag(tagName) {
+                        backing.addAttribute(.strikethroughStyle,
+                                             value: NSUnderlineStyle.single.rawValue,
+                                             range: fullLineRange)
+                    }
+
+                    // Bullets/numéros prennent la couleur du tag
+                    let nsLine = line as NSString
+                    if let bm = rx(#"^(\s*)([-*+])(\s)"#).firstMatch(in: line, range: lineRange) {
+                        backing.addAttribute(.foregroundColor, value: color,
+                                             range: NSRange(location: offset + bm.range(at: 2).location, length: 1))
+                    }
+                    if let nm = rx(#"^(\s*)(\d+\.)(\s)"#).firstMatch(in: line, range: lineRange) {
+                        backing.addAttribute(.foregroundColor, value: color,
+                                             range: NSRange(location: offset + nm.range(at: 2).location,
+                                                            length: nm.range(at: 2).length))
+                        _ = nsLine
+                    }
                 }
-                // @tag reste en gris tertiaire par-dessus
+
+                // @tag reste en tertiaire
                 if valid(tagNSRange) {
                     backing.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: tagNSRange)
                 }
@@ -171,6 +234,31 @@ final class MarkdownTextStorage: NSTextStorage {
             offset += lineLen + 1
         }
     }
+
+    // MARK: - Active tag highlight
+
+    private func applyActiveTagHighlight(text: String) {
+        guard let tag = activeTag else { return }
+        let pattern = #"@"# + NSRegularExpression.escapedPattern(for: tag) + #"(?=\s*[.!?]?\s*$)"#
+        guard let tagRx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
+
+        let lines = text.components(separatedBy: "\n")
+        var offset = 0
+        for line in lines {
+            let lineLen = (line as NSString).length
+            if tagRx.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) != nil {
+                let fullLineRange = NSRange(location: offset, length: lineLen)
+                if valid(fullLineRange) {
+                    backing.addAttribute(.backgroundColor,
+                                         value: NSColor.systemOrange.withAlphaComponent(0.15),
+                                         range: fullLineRange)
+                }
+            }
+            offset += lineLen + 1
+        }
+    }
+
+    // MARK: - Inline helpers
 
     private func inline(_ pattern: String, _ text: String, _ range: NSRange,
                         attrs: [NSAttributedString.Key: Any]) {
@@ -233,53 +321,12 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    // MARK: - Folding
-
-    private func applyFolding(text: String) {
-        guard !foldedHeadings.isEmpty else { return }
-        let lines = text.components(separatedBy: "\n")
-        var offset = 0
-        var foldingLevel: Int? = nil
-        var foldRange: NSRange? = nil
-
-        for (i, line) in lines.enumerated() {
-            let lineLen = (line as NSString).length
-            var currentLevel: Int? = nil
-            if let m = rx(#"^(#{1,6})([ \t]+)"#).firstMatch(in: line,
-                          range: NSRange(location: 0, length: lineLen)) {
-                currentLevel = m.range(at: 1).length
-            }
-            if let level = currentLevel {
-                if let fr = foldRange { applyFoldAttrs(range: fr); foldRange = nil; foldingLevel = nil }
-                if foldedHeadings.contains(offset) { foldingLevel = level }
-            } else if foldingLevel != nil {
-                let nextIsHeading: Bool = {
-                    guard i + 1 < lines.count else { return false }
-                    let next = lines[i + 1]
-                    return rx(#"^#{1,6}[ \t]"#).firstMatch(
-                        in: next, range: NSRange(location: 0, length: (next as NSString).length)) != nil
-                }()
-                foldRange = foldRange.map { NSRange(location: $0.location, length: $0.length + lineLen + 1) }
-                          ?? NSRange(location: offset, length: lineLen + 1)
-                if nextIsHeading { if let fr = foldRange { applyFoldAttrs(range: fr) }; foldRange = nil; foldingLevel = nil }
-            }
-            offset += lineLen + 1
-        }
-        if let fr = foldRange { applyFoldAttrs(range: fr) }
-    }
-
-    private func applyFoldAttrs(range: NSRange) {
-        let safe = NSRange(location: range.location,
-                           length: min(range.length, backing.length - range.location))
-        guard safe.length > 0 else { return }
-        backing.addAttributes([.foregroundColor: NSColor.clear, .font: NSFont.systemFont(ofSize: 0.01)], range: safe)
-    }
-
     // MARK: - Utilities
 
     private func hide(at location: Int, length: Int) {
         guard length > 0, location + length <= backing.length else { return }
-        backing.addAttributes([.foregroundColor: NSColor.clear, .font: NSFont.systemFont(ofSize: 0.01)],
+        backing.addAttributes([.foregroundColor: NSColor.clear,
+                                .font: NSFont.systemFont(ofSize: 0.01)],
                                range: NSRange(location: location, length: length))
     }
 
@@ -294,26 +341,34 @@ final class MarkdownTextStorage: NSTextStorage {
         return r
     }
 
+    // MARK: - Fonts
+
     private func headingFont(_ level: Int) -> NSFont {
-        let sizes: [CGFloat] = [30, 24, 20, 18, 17, 15]
-        return .boldSystemFont(ofSize: sizes[min(level - 1, 5)])
+        switch level {
+        case 1: return preferences?.h1Font ?? .boldSystemFont(ofSize: 20)
+        case 2: return preferences?.h2Font ?? .boldSystemFont(ofSize: 18)
+        default: return preferences?.h3Font ?? .boldSystemFont(ofSize: fontSize)
+        }
+    }
+
+    private func boldFont() -> NSFont {
+        NSFontManager.shared.convert(bodyFont, toHaveTrait: .boldFontMask)
+    }
+
+    private func italicFont() -> NSFont {
+        NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)
     }
 
     private func boldItalicFont() -> NSFont {
-        NSFont(descriptor: Self.body.fontDescriptor.withSymbolicTraits([.bold, .italic]),
-               size: Self.fontSize) ?? Self.body
+        var f = NSFontManager.shared.convert(bodyFont, toHaveTrait: .boldFontMask)
+        f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)
+        return f
     }
 
     private var bodyAttrs: [NSAttributedString.Key: Any] {
         let s = NSMutableParagraphStyle()
-        s.lineSpacing = 5
-        s.paragraphSpacing = 2
-        return [.font: Self.body, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
-    }
-}
-
-extension NSFont {
-    func italic() -> NSFont {
-        NSFont(descriptor: fontDescriptor.withSymbolicTraits(.italic), size: pointSize) ?? self
+        s.lineSpacing      = 5
+        s.paragraphSpacing = 4
+        return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }

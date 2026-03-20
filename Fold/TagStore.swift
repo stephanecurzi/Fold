@@ -4,30 +4,53 @@ import Observation
 
 private let colorsKey = "fold.tagColors"
 
-// Couleurs par défaut pour les premiers tags
-private let defaultColors: [String] = [
-    "#fe5000", "#0066ff", "#00b340", "#bf00ff",
-    "#ff3b30", "#ff9500", "#34c759", "#007aff"
+// Étiquettes par défaut avec leurs couleurs
+private let defaultTags: [String: String] = [
+    "done":       "#FF383C",
+    "inprogress": "#0088FF",
+    "design":     "#FE5000"
 ]
 
 @MainActor
 @Observable
 final class TagStore {
 
-    // [tagName: hexColor]
     var tagColors: [String: String] = [:]
-
-    private var colorIndex = 0
 
     init() {
         load()
+        // Ajoute les étiquettes par défaut si pas encore configurées
+        for (tag, color) in defaultTags {
+            if tagColors[tag] == nil {
+                tagColors[tag] = color
+            }
+        }
+        save()
     }
 
-    // MARK: - Couleur d'un tag
+    // MARK: - Extraction @tags en fin de phrase/ligne
+
+    static func extract(from content: String) -> [String] {
+        let pattern = #"@(\w+)(?=\s*[.!?]?\s*$)"#
+        guard let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return [] }
+        let range = NSRange(content.startIndex..., in: content)
+        let matches = rx.matches(in: content, range: range)
+        return Array(Set(matches.compactMap { m -> String? in
+            guard let r = Range(m.range(at: 1), in: content) else { return nil }
+            return String(content[r]).lowercased()
+        })).sorted()
+    }
+
+    // MARK: - @done = texte barré
+
+    static func isDoneTag(_ tag: String) -> Bool {
+        tag.lowercased() == "done"
+    }
+
+    // MARK: - Couleurs
 
     func color(for tag: String) -> NSColor {
-        let hex = tagColors[tag] ?? colorForNew(tag)
-        return NSColor(hex: hex) ?? .tertiaryLabelColor
+        NSColor(hex: tagColors[tag] ?? colorForNew(tag)) ?? .tertiaryLabelColor
     }
 
     func swiftUIColor(for tag: String) -> Color {
@@ -39,29 +62,12 @@ final class TagStore {
         save()
     }
 
-    // Assigne automatiquement une couleur si le tag est nouveau
     @discardableResult
     func colorForNew(_ tag: String) -> String {
         if let existing = tagColors[tag] { return existing }
-        let hex = defaultColors[colorIndex % defaultColors.count]
-        colorIndex += 1
-        tagColors[tag] = hex
+        tagColors[tag] = "#8E8E93"
         save()
-        return hex
-    }
-
-    // MARK: - Extraction @tags en fin de phrase/ligne
-
-    static func extract(from content: String) -> [String] {
-        let pattern = #"@(\w+)(?=\s*[.!?]?\s*$)"#
-        guard let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return [] }
-        let range = NSRange(content.startIndex..., in: content)
-        let matches = rx.matches(in: content, range: range)
-        let tags = matches.compactMap { match -> String? in
-            guard let r = Range(match.range(at: 1), in: content) else { return nil }
-            return String(content[r]).lowercased()
-        }
-        return Array(Set(tags)).sorted()
+        return "#8E8E93"
     }
 
     // MARK: - Persistance
@@ -75,7 +81,7 @@ final class TagStore {
     }
 }
 
-// MARK: - NSColor hex init
+// MARK: - NSColor hex
 
 extension NSColor {
     convenience init?(hex: String) {
@@ -88,19 +94,14 @@ extension NSColor {
             alpha: 1
         )
     }
-
     var hexString: String {
-        guard let c = usingColorSpace(.sRGB) else { return "#000000" }
+        guard let c = usingColorSpace(.sRGB) else { return "#8E8E93" }
         return String(format: "#%02x%02x%02x",
-            Int(c.redComponent * 255),
-            Int(c.greenComponent * 255),
-            Int(c.blueComponent * 255))
+            Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
     }
 }
 
 import SwiftUI
 extension Color {
-    init(hex: String) {
-        self.init(nsColor: NSColor(hex: hex) ?? .labelColor)
-    }
+    init(hex: String) { self.init(nsColor: NSColor(hex: hex) ?? .secondaryLabelColor) }
 }

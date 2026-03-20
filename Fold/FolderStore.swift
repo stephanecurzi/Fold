@@ -2,15 +2,14 @@ import Foundation
 import Observation
 
 private let readableExtensions = ["md", "txt", "text", "markdown", "mdown", "mkd", "rst", "fountain", "tex", "org"]
+private let bookmarksKey = "fold.folderBookmarks"
 
-// Document simplifié — remplace TextDocument
 struct FolderItem: Identifiable, Equatable {
     let id: UUID
     let title: String
     let content: String
     let fileURL: URL
     let updatedAt: Date
-
     static func == (lhs: FolderItem, rhs: FolderItem) -> Bool { lhs.fileURL == rhs.fileURL }
 }
 
@@ -28,14 +27,22 @@ final class FolderStore {
 
     var folders: [OpenFolder] = []
 
-    init() {}
+    init() { restorePersistedFolders() }
+
+    // MARK: - Public
 
     func addFolder(url: URL) {
         if let idx = folders.firstIndex(where: { $0.url == url }) {
             folders[idx].documents = loadDocuments(from: url)
-            return
+        } else {
+            folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
         }
-        folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
+        persistFolders()
+    }
+
+    func removeFolder(_ folder: OpenFolder) {
+        folders.removeAll { $0.id == folder.id }
+        persistFolders()
     }
 
     func refreshAll() {
@@ -44,9 +51,38 @@ final class FolderStore {
         }
     }
 
-    func removeFolder(_ folder: OpenFolder) {
-        folders.removeAll { $0.id == folder.id }
+    // MARK: - Persistance via Security-Scoped Bookmarks
+
+    private func persistFolders() {
+        let bookmarks: [Data] = folders.compactMap { folder in
+            try? folder.url.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+        }
+        UserDefaults.standard.set(bookmarks, forKey: bookmarksKey)
     }
+
+    private func restorePersistedFolders() {
+        guard let saved = UserDefaults.standard.array(forKey: bookmarksKey) as? [Data] else { return }
+        for data in saved {
+            var stale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) else { continue }
+            let accessing = url.startAccessingSecurityScopedResource()
+            defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+            if FileManager.default.fileExists(atPath: url.path) {
+                folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
+            }
+        }
+    }
+
+    // MARK: - Load documents
 
     private func loadDocuments(from url: URL) -> [FolderItem] {
         let accessing = url.startAccessingSecurityScopedResource()
@@ -65,14 +101,10 @@ final class FolderStore {
                       let attrs   = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
                       let date    = attrs.contentModificationDate
                 else { return nil }
-                return FolderItem(
-                    id:        UUID(),
-                    title:     fileURL.deletingPathExtension().lastPathComponent,
-                    content:   content,
-                    fileURL:   fileURL,
-                    updatedAt: date
-                )
+                return FolderItem(id: UUID(), title: fileURL.deletingPathExtension().lastPathComponent,
+                                  content: content, fileURL: fileURL, updatedAt: date)
             }
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 }
+
