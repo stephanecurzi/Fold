@@ -20,6 +20,11 @@ struct FoldApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
+
+        // NOTE : Pour que les contrôles AppKit (boutons, etc.) utilisent
+        // aussi orange, il faut définir une couleur "AccentColor" dans
+        // Assets.xcassets ET ajouter NSAccentColorName dans Info.plist.
+        // Le .tint(.orange) SwiftUI couvre les contrôles SwiftUI uniquement.
     }
 
     var body: some Scene {
@@ -30,16 +35,11 @@ struct FoldApp: App {
                 .environment(prefs)
                 .tint(.orange)
         }
+        // Taille réduite — la sidebar ajoute ~240 pt quand elle s'ouvre
         .defaultSize(width: 940, height: 680)
         .commands {
             CommandGroup(replacing: .windowArrangement) {}
 
-            // ── Recherche ─────────────────────────────
-            // SwiftUI intercepte ⌘F via CommandGroup et
-            // poste une notification. CenteredTextView
-            // l'attrape et appelle performTextFinderAction
-            // avec un NSMenuItem (le seul sender valide
-            // car AppKit lit sender.tag pour connaître l'action).
             CommandGroup(replacing: .textEditing) {
                 Button("Rechercher…") {
                     NotificationCenter.default.post(name: .foldSearch, object: nil)
@@ -98,7 +98,7 @@ struct FoldApp: App {
                 Divider()
                 Button("Gras") { wrapSelection("**", "**") }
                     .keyboardShortcut("b", modifiers: .command)
-                Button("Italique") { wrapSelection("*", "*") }
+                Button("Italique") { wrapSelection("_", "_") }
                     .keyboardShortcut("i", modifiers: .command)
                 Button("Code") { wrapSelection("`", "`") }
                     .keyboardShortcut("j", modifiers: .command)
@@ -176,14 +176,38 @@ struct FoldApp: App {
         let sel = tv.selectedRange()
         guard sel.length > 0 else { return }
         var text = (tv.string as NSString).substring(with: sel)
-        let patterns = ["\\*\\*\\*(.+?)\\*\\*\\*", "\\*\\*(.+?)\\*\\*", "\\*(.+?)\\*",
-                        "`(.+?)`", "~~(.+?)~~", "==(.+?)==",
-                        "^#{1,6}\\s+", "^[-*+]\\s+", "^\\d+\\.\\s+",
-                        "^>\\s+", "^- \\[[ x]\\] "]
-        for pattern in patterns {
-            if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
+
+        // Les blocs triple-backtick doivent être traités EN PREMIER,
+        // avant le pattern à backtick simple, pour éviter le backtick résiduel.
+        let blockPatterns: [(String, NSRegularExpression.Options)] = [
+            ("```[^\\n]*\\n([\\s\\S]*?)\\n```", .dotMatchesLineSeparators), // bloc de code
+            ("\\*\\*\\*(.+?)\\*\\*\\*", []),
+            ("___(.+?)___",             []),
+            ("\\*\\*(.+?)\\*\\*",       []),
+            ("__(.+?)__",               []),
+            // backtick simple — lookahead/lookbehind pour ne pas toucher ```
+            ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", []),
+            ("\\*([^*\\n]+)\\*",        []),
+            ("_([^_\\n]+)_",            []),
+            ("~~(.+?)~~",               []),
+            ("==(.+?)==",               []),
+        ]
+        let linePatterns = [
+            "^#{1,6}\\s+", "^[-*+]\\s+", "^\\d+\\.\\s+",
+            "^>\\s*", "^- \\[[ x]\\] "
+        ]
+
+        for (pattern, options) in blockPatterns {
+            let allOptions = options.union(.anchorsMatchLines)
+            if let rx = try? NSRegularExpression(pattern: pattern, options: allOptions) {
                 let range = NSRange(text.startIndex..., in: text)
                 text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
+            }
+        }
+        for pattern in linePatterns {
+            if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
+                let range = NSRange(text.startIndex..., in: text)
+                text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: "")
             }
         }
         tv.insertText(text, replacementRange: sel)

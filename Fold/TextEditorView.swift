@@ -83,7 +83,7 @@ struct CenteredEditorView: NSViewRepresentable {
         textStorage.activeTag = activeTag
         textStorage.preferences = preferences
 
-        let layoutMgr = NSLayoutManager()
+        let layoutMgr = FoldLayoutManager()
         let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         container.widthTracksTextView = true
         textStorage.addLayoutManager(layoutMgr)
@@ -118,10 +118,14 @@ struct CenteredEditorView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
 
-        // Doit être APRÈS documentView = textView pour que
-        // NSScrollView puisse s'enregistrer comme findBarContainer.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
+
+        // Sélection en orange plutôt que bleu système
+        textView.selectedTextAttributes = [
+            .backgroundColor: NSColor.systemOrange.withAlphaComponent(0.28),
+            .foregroundColor: NSColor.labelColor
+        ]
 
         DispatchQueue.main.async {
             textView.window?.makeFirstResponder(textView)
@@ -141,7 +145,9 @@ struct CenteredEditorView: NSViewRepresentable {
             let colorsChanged = tagColors != (s.currentTagColors ?? [:])
             s.currentTagColors = tagColors
             if prefsChanged || tagChanged || colorsChanged {
+                s.beginEditing()
                 s.edited(.editedAttributes, range: NSRange(location: 0, length: s.length), changeInLength: 0)
+                s.endEditing()
             }
         }
         guard tv.string != text else { return }
@@ -150,13 +156,46 @@ struct CenteredEditorView: NSViewRepresentable {
         tv.setSelectedRange(NSRange(location: min(sel.location, (text as NSString).length), length: 0))
     }
 
+    // MARK: - Coordinator
+
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CenteredEditorView
         weak var textView: CenteredTextView?
         init(_ p: CenteredEditorView) { parent = p }
+
         func textDidChange(_ n: Notification) {
             guard let tv = n.object as? NSTextView else { return }
             parent.text = tv.string
+        }
+
+        /// Ouvre les liens au clic (Cmd+Clic dans une NSTextView éditable).
+        func textView(_ tv: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            if let url = link as? URL {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            if let str = link as? String, let url = URL(string: str) {
+                NSWorkspace.shared.open(url)
+                return true
+            }
+            return false
+        }
+
+        /// Met à jour le cursorRange dans le storage et re-highlight
+        /// pour afficher/masquer les marqueurs Markdown selon la position du curseur.
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView,
+                  let s = tv.textStorage as? MarkdownTextStorage else { return }
+            let newRange = tv.selectedRange()
+            guard s.cursorRange.location != newRange.location
+                    || s.cursorRange.length != newRange.length else { return }
+            s.cursorRange = newRange
+            // Déclenche un re-highlight via le mécanisme standard du NSTextStorage
+            s.beginEditing()
+            s.edited(.editedAttributes,
+                     range: NSRange(location: 0, length: s.length),
+                     changeInLength: 0)
+            s.endEditing()
         }
     }
 }
@@ -183,11 +222,7 @@ final class CenteredTextView: NSTextView {
 
     deinit { NotificationCenter.default.removeObserver(self) }
 
-    // MARK: - NSTextFinder via NSMenuItem
-    //
-    // performTextFinderAction(_:) lit sender.tag pour connaître
-    // l'action à exécuter. NSMenuItem est le seul type standard
-    // qui expose un `tag` Int — NSNumber ne fonctionne PAS ici.
+    // MARK: - NSTextFinder
 
     private func find(_ action: NSTextFinder.Action) {
         guard window?.isKeyWindow == true else { return }
@@ -218,12 +253,78 @@ final class CenteredTextView: NSTextView {
     // MARK: - Clavier
 
     override func keyDown(with event: NSEvent) {
-        // Tab → 2 espaces
-        if event.keyCode == 48 && !event.modifierFlags.contains(.shift) {
+        switch event.keyCode {
+        case 48 where !event.modifierFlags.contains(.shift):
+            // Tab → 2 espaces
             insertText("  ", replacementRange: selectedRange())
-        } else {
+        case 36:
+            // Return → continuation de liste si applicable
+            if !handleListContinuation() {
+                super.keyDown(with: event)
+            }
+        default:
             super.keyDown(with: event)
         }
+    }
+
+    // MARK: - Continuation de liste
+
+    /// Insère automatiquement le préfixe de liste approprié après un Return.
+    /// Retourne true si la liste a été continuée (dans ce cas, ne pas appeler super).
+    @discardableResult
+    private func handleListContinuation() -> Bool {
+        let sel = selectedRange()
+        let str = string as NSString
+        let lineRange = str.lineRange(for: NSRange(location: sel.location, length: 0))
+        var line = str.substring(with: lineRange)
+        // Supprime le \n final pour les patterns
+        if line.hasSuffix("\n") { line = String(line.dropLast()) }
+        let nsLine = line as NSString
+        let lr = NSRange(location: 0, length: nsLine.length)
+
+        // ── Liste de tâches — à tester AVANT la liste non ordonnée ──
+        if let m = rx(#"^(\s*)(- \[[ x]\] )(.+)$"#).firstMatch(in: line, range: lr) {
+            // Ligne vide (seulement le marqueur) → supprimer le préfixe
+            if m.range(at: 3).length == 0 {
+                insertText("\n", replacementRange: lineRange)
+                return true
+            }
+            let indent = nsLine.substring(with: m.range(at: 1))
+            insertText("\n\(indent)- [ ] ", replacementRange: sel)
+            return true
+        }
+
+        // ── Liste non ordonnée ────────────────────────
+        if let m = rx(#"^(\s*)([-*+]) (.+)$"#).firstMatch(in: line, range: lr) {
+            let indent = nsLine.substring(with: m.range(at: 1))
+            let bullet = nsLine.substring(with: m.range(at: 2))
+            insertText("\n\(indent)\(bullet) ", replacementRange: sel)
+            return true
+        }
+
+        // ── Ligne vide d'une liste non ordonnée → supprimer ──
+        if rx(#"^(\s*)([-*+]) $"#).firstMatch(in: line, range: lr) != nil {
+            // Remplace toute la ligne par un simple saut de ligne
+            insertText("\n", replacementRange: lineRange)
+            return true
+        }
+
+        // ── Liste ordonnée ────────────────────────────
+        if let m = rx(#"^(\s*)(\d+)\. (.+)$"#).firstMatch(in: line, range: lr) {
+            let indent  = nsLine.substring(with: m.range(at: 1))
+            let numStr  = nsLine.substring(with: m.range(at: 2))
+            let nextNum = (Int(numStr) ?? 1) + 1
+            insertText("\n\(indent)\(nextNum). ", replacementRange: sel)
+            return true
+        }
+
+        // ── Ligne vide d'une liste ordonnée → supprimer ──
+        if rx(#"^(\s*)\d+\. $"#).firstMatch(in: line, range: lr) != nil {
+            insertText("\n", replacementRange: lineRange)
+            return true
+        }
+
+        return false
     }
 
     // Double-clic → fold/unfold heading
@@ -247,9 +348,108 @@ final class CenteredTextView: NSTextView {
         } else {
             storage.foldedHeadings.insert(lineStart)
         }
-        storage.edited(.editedAttributes, range: NSRange(location: 0, length: storage.length), changeInLength: 0)
-        storage.processEditing()
+        storage.beginEditing()
+        storage.edited(.editedAttributes,
+                       range: NSRange(location: 0, length: storage.length),
+                       changeInLength: 0)
+        storage.endEditing()
         needsDisplay = true
     }
+
+    // MARK: - Regex helper local (liste continuation)
+
+    private static var rxCache: [String: NSRegularExpression] = [:]
+    private func rx(_ pattern: String) -> NSRegularExpression {
+        if let cached = Self.rxCache[pattern] { return cached }
+        let r = try! NSRegularExpression(pattern: pattern)
+        Self.rxCache[pattern] = r
+        return r
+    }
 }
+
+// MARK: - FoldLayoutManager — dessine les fonds et barres custom
+
+final class FoldLayoutManager: NSLayoutManager {
+
+    private let barWidth:  CGFloat = 3
+    private let barInset:  CGFloat = 6
+    private let barRadius: CGFloat = 1.5
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+
+        guard let storage = textStorage,
+              let container = textContainers.first else { return }
+
+        let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+
+        drawBars(for: .foldCodeBlock,  color: .systemGray,   in: charRange,
+                 storage: storage, container: container, origin: origin)
+        drawBars(for: .foldBlockquote, color: .systemOrange, in: charRange,
+                 storage: storage, container: container, origin: origin)
+    }
+
+    /// Parcourt la plage caractère par caractère en sautant de run en run,
+    /// groupe les lignes consécutives marquées avec `key`, et dessine
+    /// une seule barre continue par groupe.
+    private func drawBars(for key: NSAttributedString.Key,
+                          color: NSColor,
+                          in charRange: NSRange,
+                          storage: NSTextStorage,
+                          container: NSTextContainer,
+                          origin: NSPoint) {
+
+        // 1. Collecter les line-fragment rects de chaque ligne marquée
+        var markedRects: [CGRect] = []
+
+        var pos = charRange.location
+        let end = charRange.location + charRange.length
+
+        while pos < end {
+            var effectiveRange = NSRange(location: NSNotFound, length: 0)
+            let value = storage.attribute(key, at: pos, longestEffectiveRange: &effectiveRange,
+                                          in: charRange)
+            let runEnd = min(effectiveRange.location + effectiveRange.length, end)
+
+            if value != nil {
+                // Toutes les lignes de cette plage sont marquées
+                let glRange = glyphRange(forCharacterRange: NSRange(location: pos, length: runEnd - pos),
+                                         actualCharacterRange: nil)
+                enumerateLineFragments(forGlyphRange: glRange) { rect, _, _, _, _ in
+                    markedRects.append(rect)
+                }
+            }
+            pos = runEnd
+        }
+
+        // 2. Fusionner les rects consécutifs (adjacents verticalement) en groupes
+        //    et dessiner une barre par groupe
+        guard !markedRects.isEmpty else { return }
+
+        let barX = origin.x + container.lineFragmentPadding + barInset
+        var groupRect = markedRects[0]
+
+        func drawBar(rect: CGRect) {
+            let barRect = CGRect(x: barX,
+                                 y: origin.y + rect.minY,
+                                 width: barWidth,
+                                 height: rect.height)
+            color.setFill()
+            NSBezierPath(roundedRect: barRect, xRadius: barRadius, yRadius: barRadius).fill()
+        }
+
+        for i in 1..<markedRects.count {
+            let current = markedRects[i]
+            // Adjacent si le haut du rect suivant touche (ou chevauche) le bas du groupe courant
+            if abs(current.minY - groupRect.maxY) < 2 {
+                groupRect = groupRect.union(current)
+            } else {
+                drawBar(rect: groupRect)
+                groupRect = current
+            }
+        }
+        drawBar(rect: groupRect)
+    }
+}
+
 
