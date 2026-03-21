@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 
+// NOTE : Notification.Name est défini dans FoldApp.swift uniquement.
+
 struct TextEditorView: View {
     @ObservedObject var document: FoldDocument
     @Environment(TagStore.self) var tagStore
@@ -19,8 +21,6 @@ struct TextEditorView: View {
                 tagColors: tagStore.tagColors,
                 tagColorProvider: { tagStore.color(for: $0) }
             )
-
-            // Pastille Liquid Glass
             if let tag = activeTag {
                 ActiveTagPill(tag: tag) {
                     withAnimation(.spring(duration: 0.3)) { activeTag = nil }
@@ -34,8 +34,7 @@ struct TextEditorView: View {
     }
 }
 
-
-// MARK: - Pastille Liquid Glass
+// MARK: - Pastille tag actif
 
 struct ActiveTagPill: View {
     let tag: String
@@ -73,7 +72,7 @@ struct CenteredEditorView: NSViewRepresentable {
     var preferences: PreferencesStore? = nil
     var fontSize: CGFloat = 16
     var fontName: String = "SF Pro Text"
-    var tagColors: [String: String] = [:]  // Force re-render quand les couleurs changent
+    var tagColors: [String: String] = [:]
     var tagColorProvider: ((String) -> NSColor)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -119,7 +118,14 @@ struct CenteredEditorView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
                                   height: CGFloat.greatestFiniteMagnitude)
 
-        DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+        // Doit être APRÈS documentView = textView pour que
+        // NSScrollView puisse s'enregistrer comme findBarContainer.
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
+
+        DispatchQueue.main.async {
+            textView.window?.makeFirstResponder(textView)
+        }
         return scroll
     }
 
@@ -127,18 +133,13 @@ struct CenteredEditorView: NSViewRepresentable {
         guard let tv = scroll.documentView as? NSTextView else { return }
         if let s = tv.textStorage as? MarkdownTextStorage {
             s.tagColorProvider = tagColorProvider
-
             let prefsChanged = s.preferences?.fontSize != preferences?.fontSize
                             || s.preferences?.fontName  != preferences?.fontName
             s.preferences = preferences
-
             let tagChanged = s.activeTag != activeTag
             s.activeTag = activeTag
-
             let colorsChanged = tagColors != (s.currentTagColors ?? [:])
             s.currentTagColors = tagColors
-
-            // Re-highlight si préférences, tag actif ou couleurs changent
             if prefsChanged || tagChanged || colorsChanged {
                 s.edited(.editedAttributes, range: NSRange(location: 0, length: s.length), changeInLength: 0)
             }
@@ -153,7 +154,6 @@ struct CenteredEditorView: NSViewRepresentable {
         var parent: CenteredEditorView
         weak var textView: CenteredTextView?
         init(_ p: CenteredEditorView) { parent = p }
-
         func textDidChange(_ n: Notification) {
             guard let tv = n.object as? NSTextView else { return }
             parent.text = tv.string
@@ -166,13 +166,46 @@ struct CenteredEditorView: NSViewRepresentable {
 final class CenteredTextView: NSTextView {
     var maxContentWidth: CGFloat = 780
 
-    override func setFrameSize(_ newSize: NSSize) {
-        super.setFrameSize(newSize)
-        updateInset()
-    }
+    // MARK: - Cycle de vie
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        updateInset()
+        guard window != nil else { return }
+        let nc = NotificationCenter.default
+        nc.removeObserver(self)
+        nc.addObserver(self, selector: #selector(onSearch),   name: .foldSearch,   object: nil)
+        nc.addObserver(self, selector: #selector(onReplace),  name: .foldReplace,  object: nil)
+        nc.addObserver(self, selector: #selector(onNext),     name: .foldFindNext, object: nil)
+        nc.addObserver(self, selector: #selector(onPrev),     name: .foldFindPrev, object: nil)
+        nc.addObserver(self, selector: #selector(onHide),     name: .foldFindHide, object: nil)
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    // MARK: - NSTextFinder via NSMenuItem
+    //
+    // performTextFinderAction(_:) lit sender.tag pour connaître
+    // l'action à exécuter. NSMenuItem est le seul type standard
+    // qui expose un `tag` Int — NSNumber ne fonctionne PAS ici.
+
+    private func find(_ action: NSTextFinder.Action) {
+        guard window?.isKeyWindow == true else { return }
+        let item = NSMenuItem()
+        item.tag = action.rawValue
+        performTextFinderAction(item)
+    }
+
+    @objc private func onSearch(_:  Notification) { find(.showFindInterface)    }
+    @objc private func onReplace(_: Notification) { find(.showReplaceInterface) }
+    @objc private func onNext(_:    Notification) { find(.nextMatch)            }
+    @objc private func onPrev(_:    Notification) { find(.previousMatch)        }
+    @objc private func onHide(_:    Notification) { find(.hideFindInterface)    }
+
+    // MARK: - Mise en page
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
         updateInset()
     }
 
@@ -181,4 +214,42 @@ final class CenteredTextView: NSTextView {
         let horizontalInset = max(50, (width - maxContentWidth) / 2)
         textContainerInset = NSSize(width: horizontalInset, height: 50)
     }
+
+    // MARK: - Clavier
+
+    override func keyDown(with event: NSEvent) {
+        // Tab → 2 espaces
+        if event.keyCode == 48 && !event.modifierFlags.contains(.shift) {
+            insertText("  ", replacementRange: selectedRange())
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    // Double-clic → fold/unfold heading
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        if event.clickCount == 2 { toggleFoldAtCursor() }
+    }
+
+    private func toggleFoldAtCursor() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        let charIndex = selectedRange().location
+        let text = string as NSString
+        let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
+        let line = text.substring(with: lineRange)
+        guard let rxObj = try? NSRegularExpression(pattern: #"^#{1,6}[ \t]"#),
+              rxObj.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
+        else { return }
+        let lineStart = lineRange.location
+        if storage.foldedHeadings.contains(lineStart) {
+            storage.foldedHeadings.remove(lineStart)
+        } else {
+            storage.foldedHeadings.insert(lineStart)
+        }
+        storage.edited(.editedAttributes, range: NSRange(location: 0, length: storage.length), changeInLength: 0)
+        storage.processEditing()
+        needsDisplay = true
+    }
 }
+

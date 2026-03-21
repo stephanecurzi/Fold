@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @State private var activeTag: String? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var searchStore = SearchStore()
 
     private var currentTags: [String] {
         TagStore.extract(from: document.text)
@@ -30,6 +31,7 @@ struct ContentView: View {
         .environment(folderStore)
         .environment(tagStore)
         .environment(prefs)
+        .environment(searchStore)
         .tint(.orange)
         .onAppear {
             columnVisibility = .detailOnly

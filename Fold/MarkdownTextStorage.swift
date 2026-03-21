@@ -63,7 +63,7 @@ final class MarkdownTextStorage: NSTextStorage {
 
         applyInline(text: text, in: full)
         applyTagLineColors(text: text)
-        applyActiveTagHighlight(text: text)
+        applyTagCollapse(text: text)
     }
 
     // MARK: - Block Elements
@@ -87,13 +87,15 @@ final class MarkdownTextStorage: NSTextStorage {
             return
         }
 
-        // ── HR — affiché comme ligne visible ──────────
+        // ── HR — ligne centrée visible ────────────────
         if rx(#"^(---+|\*\*\*+|___+)\s*$"#).firstMatch(in: line, range: lineRange) != nil {
+            let hrStyle = NSMutableParagraphStyle()
+            hrStyle.alignment = .center
+            hrStyle.lineSpacing = 8
             backing.addAttributes([
                 .foregroundColor: NSColor.separatorColor,
-                .font: NSFont.systemFont(ofSize: 4),
-                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                .strikethroughColor: NSColor.separatorColor
+                .font: NSFont.systemFont(ofSize: fontSize),
+                .paragraphStyle: hrStyle
             ], range: NSRange(location: offset, length: len))
             return
         }
@@ -235,23 +237,26 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    // MARK: - Active tag highlight
+    // MARK: - Tag highlight
 
-    private func applyActiveTagHighlight(text: String) {
+    private func applyTagCollapse(text: String) {
         guard let tag = activeTag else { return }
-        let pattern = #"@"# + NSRegularExpression.escapedPattern(for: tag) + #"(?=\s*[.!?]?\s*$)"#
-        guard let tagRx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
+        let escaped = NSRegularExpression.escapedPattern(for: tag)
+        guard let tagRx = try? NSRegularExpression(
+            pattern: "@" + escaped + #"(?=\s*[.!?]?\s*$)"#,
+            options: [.anchorsMatchLines]
+        ) else { return }
 
         let lines = text.components(separatedBy: "\n")
         var offset = 0
         for line in lines {
             let lineLen = (line as NSString).length
             if tagRx.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) != nil {
-                let fullLineRange = NSRange(location: offset, length: lineLen)
-                if valid(fullLineRange) {
+                let lineRange = NSRange(location: offset, length: lineLen)
+                if valid(lineRange) {
                     backing.addAttribute(.backgroundColor,
-                                         value: NSColor.systemOrange.withAlphaComponent(0.15),
-                                         range: fullLineRange)
+                        value: NSColor.systemOrange.withAlphaComponent(0.12),
+                        range: lineRange)
                 }
             }
             offset += lineLen + 1

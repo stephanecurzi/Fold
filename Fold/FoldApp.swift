@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+// MARK: - Notifications globales (définies ici une seule fois)
+
+extension Notification.Name {
+    static let foldSearch    = Notification.Name("fold.search")
+    static let foldReplace   = Notification.Name("fold.replace")
+    static let foldFindNext  = Notification.Name("fold.findNext")
+    static let foldFindPrev  = Notification.Name("fold.findPrev")
+    static let foldFindHide  = Notification.Name("fold.findHide")
+    static let foldAddFolder = Notification.Name("fold.addFolder")
+}
+
 @main
 struct FoldApp: App {
     @State private var folderStore = FolderStore()
@@ -9,8 +20,6 @@ struct FoldApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        // Force la langue française pour les menus système
-        UserDefaults.standard.set(["fr"], forKey: "AppleLanguages")
     }
 
     var body: some Scene {
@@ -21,15 +30,45 @@ struct FoldApp: App {
                 .environment(prefs)
                 .tint(.orange)
         }
-        .defaultSize(width: 1200, height: 760)
+        .defaultSize(width: 940, height: 680)
         .commands {
-            // ── Supprime les tabs ──────────────────────
             CommandGroup(replacing: .windowArrangement) {}
 
-            // ── Menu Format ───────────────────────────
-            CommandMenu("Format") {
+            // ── Recherche ─────────────────────────────
+            // SwiftUI intercepte ⌘F via CommandGroup et
+            // poste une notification. CenteredTextView
+            // l'attrape et appelle performTextFinderAction
+            // avec un NSMenuItem (le seul sender valide
+            // car AppKit lit sender.tag pour connaître l'action).
+            CommandGroup(replacing: .textEditing) {
+                Button("Rechercher…") {
+                    NotificationCenter.default.post(name: .foldSearch, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: .command)
 
-                // Entêtes — sous-menu
+                Button("Rechercher et remplacer…") {
+                    NotificationCenter.default.post(name: .foldReplace, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+
+                Button("Rechercher le suivant") {
+                    NotificationCenter.default.post(name: .foldFindNext, object: nil)
+                }
+                .keyboardShortcut("g", modifiers: .command)
+
+                Button("Rechercher le précédent") {
+                    NotificationCenter.default.post(name: .foldFindPrev, object: nil)
+                }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+
+                Button("Masquer la recherche") {
+                    NotificationCenter.default.post(name: .foldFindHide, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+            }
+
+            // ── Format ────────────────────────────────
+            CommandMenu("Format") {
                 Menu("Entête") {
                     Button("Entête H1") { formatLine("# ") }
                         .keyboardShortcut("1", modifiers: .command)
@@ -44,10 +83,7 @@ struct FoldApp: App {
                     Button("Entête H6") { formatLine("###### ") }
                         .keyboardShortcut("6", modifiers: .command)
                 }
-
                 Divider()
-
-                // Listes — sous-menu
                 Menu("Liste") {
                     Button("Liste non ordonnée") { formatLine("- ") }
                         .keyboardShortcut("l", modifiers: .command)
@@ -59,10 +95,7 @@ struct FoldApp: App {
                     Button("Marquer comme terminé") { toggleCheckbox() }
                         .keyboardShortcut("x", modifiers: [.command, .option])
                 }
-
                 Divider()
-
-                // Styles
                 Button("Gras") { wrapSelection("**", "**") }
                     .keyboardShortcut("b", modifiers: .command)
                 Button("Italique") { wrapSelection("*", "*") }
@@ -73,27 +106,17 @@ struct FoldApp: App {
                     .keyboardShortcut("u", modifiers: [.command, .shift])
                 Button("Surligné") { wrapSelection("==", "==") }
                     .keyboardShortcut("u", modifiers: [.command, .option])
-
                 Divider()
-
-                // Blocs
                 Button("Citation") { formatLine("> ") }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
                 Button("Bloc de code") { wrapSelection("```\n", "\n```") }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
-
                 Divider()
-
                 Button("Lien") { wrapSelection("[", "](url)") }
                     .keyboardShortcut("k", modifiers: .command)
-
                 Divider()
-
                 Button("Supprimer les styles") { removeFormatting() }
-
                 Divider()
-
-                // Zoom typographie
                 Button("Agrandir le texte") { prefs.zoomIn() }
                     .keyboardShortcut("+", modifiers: .command)
                 Button("Réduire le texte") { prefs.zoomOut() }
@@ -166,3 +189,4 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+
