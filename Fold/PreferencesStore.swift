@@ -10,10 +10,16 @@ private let fontSizeKey = "fold.fontSize"
 final class PreferencesStore {
 
     var fontName: String {
-        didSet { UserDefaults.standard.set(fontName, forKey: fontNameKey) }
+        didSet {
+            UserDefaults.standard.set(fontName, forKey: fontNameKey)
+            NotificationCenter.default.post(name: .foldPrefsChanged, object: self)
+        }
     }
     var fontSize: CGFloat {
-        didSet { UserDefaults.standard.set(Double(fontSize), forKey: fontSizeKey) }
+        didSet {
+            UserDefaults.standard.set(Double(fontSize), forKey: fontSizeKey)
+            NotificationCenter.default.post(name: .foldPrefsChanged, object: self)
+        }
     }
 
     init() {
@@ -42,8 +48,8 @@ final class PreferencesStore {
         }
     }
 
-    func zoomIn()  { if fontSize < 32 { fontSize += 1 } }
-    func zoomOut() { if fontSize > 10 { fontSize -= 1 } }
+    func zoomIn()    { if fontSize < 32 { fontSize += 1 } }
+    func zoomOut()   { if fontSize > 10 { fontSize -= 1 } }
     func zoomReset() { fontSize = 16 }
 
     // Polices disponibles filtrées — lisibles pour du texte
@@ -55,9 +61,8 @@ final class PreferencesStore {
         let filtered = families.filter { name in
             !name.hasPrefix(".") && !name.contains("Symbol") && !name.contains("Wingdings")
         }
-        // Préférés en premier
         let sorted = preferred.filter { filtered.contains($0) } +
-                     filtered.filter { !preferred.contains($0) }
+                     filtered.filter  { !preferred.contains($0) }
         return sorted
     }
 
@@ -67,3 +72,4 @@ final class PreferencesStore {
         } ?? .boldSystemFont(ofSize: size)
     }
 }
+

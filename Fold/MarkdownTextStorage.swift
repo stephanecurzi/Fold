@@ -2,11 +2,10 @@ import AppKit
 
 // MARK: - Clé d'attribut custom pour la barre gauche des citations
 
-private let kFoldMark = NSNumber(value: 1)   // valeur partagée — évite la fragmentation des plages
+private let kFoldMark = NSNumber(value: 1)
 
 extension NSAttributedString.Key {
     static let foldBlockquote = NSAttributedString.Key("fold.blockquote")
-    static let foldCodeBlock  = NSAttributedString.Key("fold.codeBlock")
 }
 
 final class MarkdownTextStorage: NSTextStorage {
@@ -23,9 +22,6 @@ final class MarkdownTextStorage: NSTextStorage {
 
     /// Position du curseur / sélection courante — mise à jour par le coordinator
     var cursorRange: NSRange = NSRange(location: NSNotFound, length: 0)
-
-    // Plages de blocs de code détectées avant le highlight
-    private var codeBlockRanges: [NSRange] = []
 
     // MARK: - Fonts
 
@@ -69,56 +65,16 @@ final class MarkdownTextStorage: NSTextStorage {
 
         backing.setAttributes(bodyAttrs, range: full)
 
-        // Pré-calcul des plages de blocs de code (avant tout autre traitement)
-        computeCodeBlockRanges(text: text)
-
-        // Blocs ligne par ligne (sauf les blocs de code, gérés séparément)
         var lineStart = 0
         for line in text.components(separatedBy: "\n") {
             let nsLine = line as NSString
-            if !isInCodeBlock(lineStart) {
-                applyBlock(line: line, nsLine: nsLine, at: lineStart)
-            }
+            applyBlock(line: line, nsLine: nsLine, at: lineStart)
             lineStart += nsLine.length + 1
         }
 
-        // Inline (évite le contenu des blocs de code via hide())
         applyInline(text: text, in: full)
-
-        // Blocs de code en dernier → écrase l'inline dans ces zones
-        applyCodeBlockStyling(text: text)
-
         applyTagLineColors(text: text)
         applyTagCollapse(text: text)
-    }
-
-    // MARK: - Code block ranges pre-computation
-
-    private func computeCodeBlockRanges(text: String) {
-        codeBlockRanges = []
-        let lines = text.components(separatedBy: "\n")
-        var offset = 0
-        var inBlock = false
-        var blockStart = 0
-
-        for line in lines {
-            let lineLen = (line as NSString).length
-            if line.hasPrefix("```") {
-                if !inBlock {
-                    inBlock = true
-                    blockStart = offset
-                } else {
-                    inBlock = false
-                    let blockEnd = offset + lineLen
-                    codeBlockRanges.append(NSRange(location: blockStart, length: blockEnd - blockStart))
-                }
-            }
-            offset += lineLen + 1
-        }
-    }
-
-    private func isInCodeBlock(_ location: Int) -> Bool {
-        codeBlockRanges.contains { NSLocationInRange(location, $0) }
     }
 
     // MARK: - Block Elements
@@ -126,7 +82,7 @@ final class MarkdownTextStorage: NSTextStorage {
     private func applyBlock(line: String, nsLine: NSString, at offset: Int) {
         let len = nsLine.length
         guard len > 0 else { return }
-        let lineRange   = NSRange(location: 0, length: len)
+        let lineRange    = NSRange(location: 0, length: len)
         let absLineRange = NSRange(location: offset, length: len)
 
         // ── Headings ──────────────────────────────────
@@ -134,8 +90,6 @@ final class MarkdownTextStorage: NSTextStorage {
             let level  = m.range(at: 1).length
             let hidden = m.range(at: 1).length + m.range(at: 2).length
             let textLn = m.range(at: 3).length
-
-            // Affiche les # si le curseur est sur cette ligne
             if !cursorTouches(absLineRange) {
                 hide(at: offset, length: hidden)
             } else {
@@ -153,7 +107,7 @@ final class MarkdownTextStorage: NSTextStorage {
         // ── HR — couleur texte de base ─────────────────
         if rx(#"^(---+|\*\*\*+|___+)\s*$"#).firstMatch(in: line, range: lineRange) != nil {
             let hrStyle = NSMutableParagraphStyle()
-            hrStyle.alignment  = .center
+            hrStyle.alignment   = .center
             hrStyle.lineSpacing = 8
             backing.addAttributes([
                 .foregroundColor: NSColor.labelColor,
@@ -169,28 +123,20 @@ final class MarkdownTextStorage: NSTextStorage {
             let spaceLen  = m.range(at: 2).length
             let tLen      = m.range(at: 3).length
             let prefixLen = markerLen + spaceLen
-
-            // Paragraphe indenté de 24 pt (la barre sera dessinée à gauche par le layout manager)
             let ps = NSMutableParagraphStyle()
             ps.firstLineHeadIndent = 24
             ps.headIndent          = 24
             ps.lineSpacing         = 5
             ps.paragraphSpacing    = 2
             backing.addAttribute(.paragraphStyle, value: ps, range: absLineRange)
-
-            // Marque la ligne pour que FoldLayoutManager dessine la barre gauche
             backing.addAttribute(.foldBlockquote, value: kFoldMark, range: absLineRange)
-
             if !cursorTouches(absLineRange) {
-                // Masque "> " entièrement
                 hide(at: offset, length: prefixLen)
             } else {
-                // Curseur sur la ligne → affiche "> " en orange pour édition
                 backing.addAttribute(.foregroundColor,
                                      value: NSColor.systemOrange.withAlphaComponent(0.7),
                                      range: NSRange(location: offset, length: prefixLen))
             }
-
             if tLen > 0 {
                 backing.addAttributes([
                     .foregroundColor: NSColor.labelColor,
@@ -205,7 +151,6 @@ final class MarkdownTextStorage: NSTextStorage {
             backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location, length: 1))
         }
-
         if let m = rx(#"^(\s*)(\d+\.)([ \t])"#).firstMatch(in: line, range: lineRange) {
             backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location,
@@ -219,55 +164,13 @@ final class MarkdownTextStorage: NSTextStorage {
                 .foregroundColor: NSColor.tertiaryLabelColor
             ], range: absLineRange)
         }
-    }
 
-    // MARK: - Code block styling (applied last, overrides inline)
-
-    private func applyCodeBlockStyling(text: String) {
-        let codePS = NSMutableParagraphStyle()
-        codePS.firstLineHeadIndent = 24   // même inset que la citation
-        codePS.headIndent          = 24
-        codePS.lineSpacing         = 3
-
-        let lines = text.components(separatedBy: "\n")
-        var offset = 0
-        var inBlock = false
-
-        for line in lines {
-            let lineLen = (line as NSString).length
-            let lineRange = NSRange(location: offset, length: lineLen)
-
-            if line.hasPrefix("```") {
-                if valid(lineRange) {
-                    let cursorHere = cursorTouches(lineRange)
-                    if cursorHere {
-                        backing.setAttributes([
-                            .font: monoFont,
-                            .foregroundColor: NSColor.systemGray,
-                            .paragraphStyle: codePS,
-                            .foldCodeBlock: kFoldMark
-                        ], range: lineRange)
-                    } else {
-                        // Ligne clôture masquée, mais marquée pour que la barre soit continue
-                        backing.setAttributes([
-                            .font: NSFont.monospacedSystemFont(ofSize: 2, weight: .regular),
-                            .foregroundColor: NSColor.clear,
-                            .paragraphStyle: codePS,
-                            .foldCodeBlock: kFoldMark
-                        ], range: lineRange)
-                    }
-                }
-                inBlock = !inBlock
-            } else if inBlock, valid(lineRange) {
-                backing.setAttributes([
-                    .font: monoFont,
-                    .foregroundColor: NSColor.systemGray,
-                    .paragraphStyle: codePS,
-                    .foldCodeBlock: kFoldMark
-                ], range: lineRange)
-            }
-
-            offset += lineLen + 1
+        // ── Bloc de code (``` ... ```) — monospace visible ─
+        if rx(#"^```"#).firstMatch(in: line, range: lineRange) != nil {
+            backing.addAttributes([
+                .font: monoFont,
+                .foregroundColor: NSColor.secondaryLabelColor
+            ], range: absLineRange)
         }
     }
 
@@ -277,10 +180,10 @@ final class MarkdownTextStorage: NSTextStorage {
         // ── Gras + Italique (*** et ___) — en premier ─
         inlineFontMerging(#"\*\*\*(.+?)\*\*\*"#,              text, full, traits: [.boldFontMask, .italicFontMask])
         inlineFontMerging(#"(?<![_])___([^_\n]+)___(?![_])"#, text, full, traits: [.boldFontMask, .italicFontMask])
-        // ── Gras (** et __) ── fusionne pour ne pas écraser un italique existant
+        // ── Gras (** et __) ───────────────────────────
         inlineFontMerging(#"\*\*(.+?)\*\*"#,                  text, full, traits: [.boldFontMask])
         inlineFontMerging(#"(?<![_])__([^_\n]+)__(?![_])"#,   text, full, traits: [.boldFontMask])
-        // ── Italique (* et _) — fusionne pour ne pas écraser un gras existant ──
+        // ── Italique (* et _) ─────────────────────────
         inlineFontMerging(#"(?<![*_])\*([^*\n]+)\*(?![*_])"#, text, full, traits: [.italicFontMask])
         inlineFontMerging(#"(?<![_\w])_([^_\n]+)_(?![_\w])"#, text, full, traits: [.italicFontMask])
         // ── Code inline — monospace, couleur de base ──
@@ -314,31 +217,25 @@ final class MarkdownTextStorage: NSTextStorage {
         guard let provider = tagColorProvider else { return }
         let pattern = #"@(\w+)(?=\s*[.!?]?\s*$)"#
         guard let tagRx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
-
         let lines = text.components(separatedBy: "\n")
         var offset = 0
-
         for line in lines {
-            let lineLen  = (line as NSString).length
+            let lineLen   = (line as NSString).length
             let lineRange = NSRange(location: 0, length: lineLen)
-
             if let m = tagRx.firstMatch(in: line, range: lineRange),
                let tagRange = Range(m.range(at: 1), in: line) {
-                let tagName      = String(line[tagRange]).lowercased()
-                let color        = provider(tagName)
+                let tagName       = String(line[tagRange]).lowercased()
+                let color         = provider(tagName)
                 let fullLineRange = NSRange(location: offset, length: lineLen)
-                let tagNSRange   = NSRange(location: offset + m.range(at: 0).location,
-                                           length: m.range(at: 0).length)
-
+                let tagNSRange    = NSRange(location: offset + m.range(at: 0).location,
+                                            length: m.range(at: 0).length)
                 if valid(fullLineRange) {
                     backing.addAttribute(.foregroundColor, value: color, range: fullLineRange)
-
                     if TagStore.isDoneTag(tagName) {
                         backing.addAttribute(.strikethroughStyle,
                                              value: NSUnderlineStyle.single.rawValue,
                                              range: fullLineRange)
                     }
-
                     if let bm = rx(#"^(\s*)([-*+])(\s)"#).firstMatch(in: line, range: lineRange) {
                         backing.addAttribute(.foregroundColor, value: color,
                                              range: NSRange(location: offset + bm.range(at: 2).location, length: 1))
@@ -349,7 +246,6 @@ final class MarkdownTextStorage: NSTextStorage {
                                                             length: nm.range(at: 2).length))
                     }
                 }
-
                 if valid(tagNSRange) {
                     backing.addAttribute(.foregroundColor, value: NSColor.tertiaryLabelColor, range: tagNSRange)
                 }
@@ -367,7 +263,6 @@ final class MarkdownTextStorage: NSTextStorage {
             pattern: "@" + escaped + #"(?=\s*[.!?]?\s*$)"#,
             options: [.anchorsMatchLines]
         ) else { return }
-
         let lines = text.components(separatedBy: "\n")
         var offset = 0
         for line in lines {
@@ -376,8 +271,8 @@ final class MarkdownTextStorage: NSTextStorage {
                 let lineRange = NSRange(location: offset, length: lineLen)
                 if valid(lineRange) {
                     backing.addAttribute(.backgroundColor,
-                        value: NSColor.systemOrange.withAlphaComponent(0.12),
-                        range: lineRange)
+                                         value: NSColor.systemOrange.withAlphaComponent(0.12),
+                                         range: lineRange)
                 }
             }
             offset += lineLen + 1
@@ -386,8 +281,6 @@ final class MarkdownTextStorage: NSTextStorage {
 
     // MARK: - Inline helpers
 
-    /// Applique des attributs sur le groupe capturé, et masque les marqueurs
-    /// sauf si le curseur se trouve dans la plage complète du match.
     private func inline(_ pattern: String, _ text: String, _ range: NSRange,
                         attrs: [NSAttributedString.Key: Any]) {
         rx(pattern).enumerateMatches(in: text, range: range) { [weak self] m, _, _ in
@@ -397,8 +290,6 @@ final class MarkdownTextStorage: NSTextStorage {
             guard valid(cap) else { return }
             let preLen = cap.location - full.location
             let sufLen = full.length - preLen - cap.length
-
-            // Affiche les marqueurs si le curseur est dans l'élément
             if !cursorTouches(full) {
                 if preLen > 0 { hide(at: full.location, length: preLen) }
                 if sufLen > 0 { hide(at: cap.location + cap.length, length: sufLen) }
@@ -417,9 +308,6 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    /// Applique un ou plusieurs traits de font (gras, italique) en fusionnant
-    /// avec le font existant. Lit le font sur le premier caractère non-masqué
-    /// de la plage capturée pour éviter de lire un font à 0.01pt.
     private func inlineFontMerging(_ pattern: String, _ text: String, _ range: NSRange,
                                    traits: NSFontTraitMask) {
         rx(pattern).enumerateMatches(in: text, range: range) { [weak self] m, _, _ in
@@ -433,8 +321,6 @@ final class MarkdownTextStorage: NSTextStorage {
                 if preLen > 0 { hide(at: full.location, length: preLen) }
                 if sufLen > 0 { hide(at: cap.location + cap.length, length: sufLen) }
             }
-            // Trouve le premier caractère non-masqué dans la plage capturée
-            // pour lire un font valide (évite les positions cachées à 0.01pt)
             let baseFont = firstVisibleFont(in: cap) ?? bodyFont
             var merged = baseFont
             for trait in [NSFontTraitMask.boldFontMask, .italicFontMask]
@@ -445,30 +331,21 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    /// Retourne le font du premier caractère non-masqué dans la plage,
-    /// ou nil si tous les caractères sont masqués.
     private func firstVisibleFont(in range: NSRange) -> NSFont? {
-        var result: NSFont? = nil
         var pos = range.location
         let end = range.location + range.length
         while pos < end {
             var effectiveRange = NSRange()
             let attrs = backing.attributes(at: pos, effectiveRange: &effectiveRange)
-            let f = attrs[.font] as? NSFont
             let fgColor = attrs[.foregroundColor] as? NSColor
-            // Un font masqué a une taille quasi nulle (≤ 0.1)
-            if let font = f, font.pointSize > 0.1,
-               fgColor != NSColor.clear {
-                result = font
-                break
+            if fgColor != NSColor.clear, let f = attrs[.font] as? NSFont, f.pointSize > 0.1 {
+                return f
             }
             pos = effectiveRange.location + effectiveRange.length
         }
-        return result
+        return nil
     }
 
-    /// Liens [texte](url) — affiche le markdown complet si curseur dans la plage,
-    /// et ajoute l'attribut .link pour rendre le lien cliquable (Cmd+Clic).
     private func inlineLinks(_ text: String, _ full: NSRange) {
         rx(#"\[([^\]\n]+)\]\(([^)\n]+)\)"#).enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
             guard let self, let m else { return }
@@ -476,15 +353,10 @@ final class MarkdownTextStorage: NSTextStorage {
             let textCap = m.range(at: 1)
             let urlCap  = m.range(at: 2)
             guard valid(textCap) else { return }
-
-            // Récupère l'URL depuis le texte source
-            let urlString: String? = valid(urlCap)
-                ? (text as NSString).substring(with: urlCap)
+            let linkURL = valid(urlCap)
+                ? URL(string: (text as NSString).substring(with: urlCap))
                 : nil
-            let linkURL = urlString.flatMap { URL(string: $0) }
-
             if cursorTouches(outer) {
-                // Curseur dans le lien → affiche tout le markdown
                 var attrs: [NSAttributedString.Key: Any] = [
                     .foregroundColor: NSColor.systemBlue,
                     .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -492,11 +364,10 @@ final class MarkdownTextStorage: NSTextStorage {
                 if let url = linkURL { attrs[.link] = url }
                 backing.addAttributes(attrs, range: outer)
             } else {
-                // Masque les délimiteurs, ne montre que le texte
-                hide(at: outer.location, length: 1)                   // [
+                hide(at: outer.location, length: 1)
                 let afterText = textCap.location + textCap.length
                 let tailLen   = outer.location + outer.length - afterText
-                if tailLen > 0 { hide(at: afterText, length: tailLen) } // ](url)
+                if tailLen > 0 { hide(at: afterText, length: tailLen) }
                 var attrs: [NSAttributedString.Key: Any] = [
                     .foregroundColor: NSColor.systemBlue,
                     .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -517,34 +388,27 @@ final class MarkdownTextStorage: NSTextStorage {
                 rx(#"(?<![#\w])#([\w]+)"#).enumerateMatches(in: text, range: lineRange) { [weak self] m, _, _ in
                     guard let self, let m else { return }
                     let r = m.range(at: 0)
-                    if valid(r) {
-                        backing.addAttribute(.foregroundColor, value: NSColor.systemPurple, range: r)
-                    }
+                    if valid(r) { backing.addAttribute(.foregroundColor, value: NSColor.systemPurple, range: r) }
                 }
             }
             offset += lineLen + 1
         }
     }
 
-    // MARK: - Cursor helpers
+    // MARK: - Cursor helper
 
-    /// Vrai si le curseur / la sélection touche (ou est dans) la plage donnée.
     private func cursorTouches(_ range: NSRange) -> Bool {
         guard cursorRange.location != NSNotFound,
               range.location != NSNotFound, range.length >= 0 else { return false }
-        let cLoc = cursorRange.location
-        let cEnd = cLoc + max(cursorRange.length, 1)  // traite le point d'insertion comme longueur 1
+        let cEnd = cursorRange.location + max(cursorRange.length, 1)
         let rEnd = range.location + range.length
-        return cLoc < rEnd && cEnd > range.location
+        return cursorRange.location < rEnd && cEnd > range.location
     }
 
     // MARK: - Hide helper
 
-    /// Masque un marqueur Markdown (couleur transparente, police minuscule).
-    /// - Ne masque pas si on est dans un bloc de code.
     private func hide(at location: Int, length: Int) {
         guard length > 0, location + length <= backing.length else { return }
-        guard !isInCodeBlock(location) else { return }
         backing.addAttributes([
             .foregroundColor: NSColor.clear,
             .font: NSFont.systemFont(ofSize: 0.01)
@@ -574,18 +438,8 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    private func boldFont() -> NSFont {
-        NSFontManager.shared.convert(bodyFont, toHaveTrait: .boldFontMask)
-    }
-
     private func italicFont() -> NSFont {
         NSFontManager.shared.convert(bodyFont, toHaveTrait: .italicFontMask)
-    }
-
-    private func boldItalicFont() -> NSFont {
-        var f = NSFontManager.shared.convert(bodyFont, toHaveTrait: .boldFontMask)
-        f = NSFontManager.shared.convert(f, toHaveTrait: .italicFontMask)
-        return f
     }
 
     private var bodyAttrs: [NSAttributedString.Key: Any] {

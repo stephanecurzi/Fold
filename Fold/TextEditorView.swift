@@ -213,11 +213,12 @@ final class CenteredTextView: NSTextView {
         guard window != nil else { return }
         let nc = NotificationCenter.default
         nc.removeObserver(self)
-        nc.addObserver(self, selector: #selector(onSearch),   name: .foldSearch,   object: nil)
-        nc.addObserver(self, selector: #selector(onReplace),  name: .foldReplace,  object: nil)
-        nc.addObserver(self, selector: #selector(onNext),     name: .foldFindNext, object: nil)
-        nc.addObserver(self, selector: #selector(onPrev),     name: .foldFindPrev, object: nil)
-        nc.addObserver(self, selector: #selector(onHide),     name: .foldFindHide, object: nil)
+        nc.addObserver(self, selector: #selector(onSearch),       name: .foldSearch,       object: nil)
+        nc.addObserver(self, selector: #selector(onReplace),      name: .foldReplace,      object: nil)
+        nc.addObserver(self, selector: #selector(onNext),         name: .foldFindNext,     object: nil)
+        nc.addObserver(self, selector: #selector(onPrev),         name: .foldFindPrev,     object: nil)
+        nc.addObserver(self, selector: #selector(onHide),         name: .foldFindHide,     object: nil)
+        nc.addObserver(self, selector: #selector(onPrefsChanged), name: .foldPrefsChanged, object: nil)
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -236,6 +237,19 @@ final class CenteredTextView: NSTextView {
     @objc private func onNext(_:    Notification) { find(.nextMatch)            }
     @objc private func onPrev(_:    Notification) { find(.previousMatch)        }
     @objc private func onHide(_:    Notification) { find(.hideFindInterface)    }
+
+    /// Reçoit la notification de changement de préférences (taille/police)
+    /// et force un re-highlight immédiat sans attendre le cycle SwiftUI.
+    @objc private func onPrefsChanged(_ n: Notification) {
+        guard let prefs = n.object as? PreferencesStore,
+              let s = textStorage as? MarkdownTextStorage else { return }
+        s.preferences = prefs
+        s.beginEditing()
+        s.edited(.editedAttributes,
+                 range: NSRange(location: 0, length: s.length),
+                 changeInLength: 0)
+        s.endEditing()
+    }
 
     // MARK: - Mise en page
 
@@ -367,7 +381,7 @@ final class CenteredTextView: NSTextView {
     }
 }
 
-// MARK: - FoldLayoutManager — dessine les fonds et barres custom
+// MARK: - FoldLayoutManager — barre verticale gauche pour les citations
 
 final class FoldLayoutManager: NSLayoutManager {
 
@@ -377,14 +391,9 @@ final class FoldLayoutManager: NSLayoutManager {
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
-
         guard let storage = textStorage,
               let container = textContainers.first else { return }
-
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
-
-        drawBars(for: .foldCodeBlock,  color: .systemGray,   in: charRange,
-                 storage: storage, container: container, origin: origin)
         drawBars(for: .foldBlockquote, color: .systemOrange, in: charRange,
                  storage: storage, container: container, origin: origin)
     }

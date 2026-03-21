@@ -4,12 +4,13 @@ import AppKit
 // MARK: - Notifications globales (définies ici une seule fois)
 
 extension Notification.Name {
-    static let foldSearch    = Notification.Name("fold.search")
-    static let foldReplace   = Notification.Name("fold.replace")
-    static let foldFindNext  = Notification.Name("fold.findNext")
-    static let foldFindPrev  = Notification.Name("fold.findPrev")
-    static let foldFindHide  = Notification.Name("fold.findHide")
-    static let foldAddFolder = Notification.Name("fold.addFolder")
+    static let foldSearch       = Notification.Name("fold.search")
+    static let foldReplace      = Notification.Name("fold.replace")
+    static let foldFindNext     = Notification.Name("fold.findNext")
+    static let foldFindPrev     = Notification.Name("fold.findPrev")
+    static let foldFindHide     = Notification.Name("fold.findHide")
+    static let foldAddFolder    = Notification.Name("fold.addFolder")
+    static let foldPrefsChanged = Notification.Name("fold.prefsChanged")
 }
 
 @main
@@ -177,34 +178,43 @@ struct FoldApp: App {
         guard sel.length > 0 else { return }
         var text = (tv.string as NSString).substring(with: sel)
 
-        // Les blocs triple-backtick doivent être traités EN PREMIER,
-        // avant le pattern à backtick simple, pour éviter le backtick résiduel.
-        let blockPatterns: [(String, NSRegularExpression.Options)] = [
-            ("```[^\\n]*\\n([\\s\\S]*?)\\n```", .dotMatchesLineSeparators), // bloc de code
-            ("\\*\\*\\*(.+?)\\*\\*\\*", []),
-            ("___(.+?)___",             []),
-            ("\\*\\*(.+?)\\*\\*",       []),
-            ("__(.+?)__",               []),
-            // backtick simple — lookahead/lookbehind pour ne pas toucher ```
-            ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", []),
-            ("\\*([^*\\n]+)\\*",        []),
-            ("_([^_\\n]+)_",            []),
-            ("~~(.+?)~~",               []),
-            ("==(.+?)==",               []),
+        // ── Bloc de code ``` ... ``` (traité EN PREMIER) ──────────────────────
+        // Pattern robuste : clôture ouvrante sur sa propre ligne, contenu quelconque,
+        // clôture fermante sur sa propre ligne (pas de \n obligatoire avant ```).
+        if let codeBlockRx = try? NSRegularExpression(
+            pattern: "^```[^\\n]*\\n([\\s\\S]*?)^```\\s*$",
+            options: [.anchorsMatchLines]
+        ) {
+            let range = NSRange(text.startIndex..., in: text)
+            text = codeBlockRx.stringByReplacingMatches(in: text, range: range,
+                                                        withTemplate: "$1")
+        }
+
+        // ── Inline (traité après les blocs) ───────────────────────────────────
+        let inlinePatterns: [(String, String)] = [
+            ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"),
+            ("___(.+?)___",             "$1"),
+            ("\\*\\*(.+?)\\*\\*",       "$1"),
+            ("__(.+?)__",               "$1"),
+            // backtick simple — lookahead/lookbehind pour éviter ```
+            ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", "$1"),
+            ("\\*([^*\\n]+)\\*",        "$1"),
+            ("_([^_\\n]+)_",            "$1"),
+            ("~~(.+?)~~",               "$1"),
+            ("==(.+?)==",               "$1"),
         ]
-        let linePatterns = [
+        let linePrefixPatterns = [
             "^#{1,6}\\s+", "^[-*+]\\s+", "^\\d+\\.\\s+",
             "^>\\s*", "^- \\[[ x]\\] "
         ]
 
-        for (pattern, options) in blockPatterns {
-            let allOptions = options.union(.anchorsMatchLines)
-            if let rx = try? NSRegularExpression(pattern: pattern, options: allOptions) {
+        for (pattern, template) in inlinePatterns {
+            if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
                 let range = NSRange(text.startIndex..., in: text)
-                text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
+                text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: template)
             }
         }
-        for pattern in linePatterns {
+        for pattern in linePrefixPatterns {
             if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
                 let range = NSRange(text.startIndex..., in: text)
                 text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: "")

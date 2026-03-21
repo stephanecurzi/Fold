@@ -28,7 +28,7 @@
       "layers" : [
         {
           "fill" : {
-            "solid" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
+            "solid" : "extended-gray:0.00000,1.00000"
           },
           "hidden" : false,
           "image-name" : "App Icon Template-2.png",
@@ -55,7 +55,7 @@
       "layers" : [
         {
           "fill" : {
-            "solid" : "extended-gray:0.00000,1.00000"
+            "solid" : "extended-srgb:1.00000,0.55294,0.15686,1.00000"
           },
           "image-name" : "App Icon Template-3.png",
           "name" : "App Icon Template-3",
