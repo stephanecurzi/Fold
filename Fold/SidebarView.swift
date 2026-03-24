@@ -188,6 +188,7 @@ struct TagRowView: View {
             Circle()
                 .fill(tagStore.swiftUIColor(for: tag))
                 .frame(width: 10, height: 10)
+                .help("Modifier la couleur de @\(tag)")
                 .onTapGesture { showPicker = true }
                 .popover(isPresented: $showPicker, arrowEdge: .trailing) {
                     TagColorPicker(tag: tag, tagStore: tagStore)
@@ -198,7 +199,7 @@ struct TagRowView: View {
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isActive
-                    ? Color.accentColor.opacity(0.15)
+                    ? tagStore.swiftUIColor(for: tag).opacity(0.10)
                     : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
         )
         .contentShape(Rectangle())
@@ -224,10 +225,6 @@ struct TagColorPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Couleur de \"\(tag)\"")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 6), count: 6), spacing: 6) {
                 ForEach(palette, id: \.self) { hex in
                     ZStack {

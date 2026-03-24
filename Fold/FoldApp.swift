@@ -21,11 +21,6 @@ struct FoldApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-
-        // NOTE : Pour que les contrôles AppKit (boutons, etc.) utilisent
-        // aussi orange, il faut définir une couleur "AccentColor" dans
-        // Assets.xcassets ET ajouter NSAccentColorName dans Info.plist.
-        // Le .tint(.orange) SwiftUI couvre les contrôles SwiftUI uniquement.
     }
 
     var body: some Scene {
@@ -36,7 +31,6 @@ struct FoldApp: App {
                 .environment(prefs)
                 .tint(.orange)
         }
-        // Taille réduite — la sidebar ajoute ~240 pt quand elle s'ouvre
         .defaultSize(width: 940, height: 680)
         .commands {
             CommandGroup(replacing: .windowArrangement) {}
@@ -134,17 +128,27 @@ struct FoldApp: App {
 
     // MARK: - Format helpers
 
+    /// Applique `prefix` à toutes les lignes couvertes par la sélection courante.
     private func formatLine(_ prefix: String) {
         guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
         let sel = tv.selectedRange()
         let str = tv.string as NSString
-        let lineRange = str.lineRange(for: sel)
-        let line = str.substring(with: lineRange)
-        let stripped = line.replacingOccurrences(
-            of: "^(#{1,6}\\s+|[-*+]\\s+|\\d+\\.\\s+|>\\s+|- \\[[ x]\\] )",
-            with: "", options: .regularExpression
-        )
-        tv.insertText(prefix + stripped, replacementRange: lineRange)
+
+        // Étend la sélection aux lignes complètes
+        let linesRange = str.lineRange(for: sel)
+        let linesText  = str.substring(with: linesRange)
+
+        // Transforme chaque ligne (ignore les lignes vides de fin de plage)
+        let parts       = linesText.components(separatedBy: "\n")
+        let transformed = parts.map { line -> String in
+            guard !line.isEmpty else { return line }
+            let stripped = line.replacingOccurrences(
+                of: "^(#{1,6}\\s+|[-*+]\\s+|\\d+\\.\\s+|>\\s+|- \\[[ x]\\] )",
+                with: "", options: .regularExpression
+            )
+            return prefix + stripped
+        }
+        tv.insertText(transformed.joined(separator: "\n"), replacementRange: linesRange)
     }
 
     private func wrapSelection(_ before: String, _ after: String) {
@@ -178,25 +182,21 @@ struct FoldApp: App {
         guard sel.length > 0 else { return }
         var text = (tv.string as NSString).substring(with: sel)
 
-        // ── Bloc de code ``` ... ``` (traité EN PREMIER) ──────────────────────
-        // Pattern robuste : clôture ouvrante sur sa propre ligne, contenu quelconque,
-        // clôture fermante sur sa propre ligne (pas de \n obligatoire avant ```).
+        // ── Bloc de code ──────────────────────────────────────────────────────
         if let codeBlockRx = try? NSRegularExpression(
             pattern: "^```[^\\n]*\\n([\\s\\S]*?)^```\\s*$",
             options: [.anchorsMatchLines]
         ) {
             let range = NSRange(text.startIndex..., in: text)
-            text = codeBlockRx.stringByReplacingMatches(in: text, range: range,
-                                                        withTemplate: "$1")
+            text = codeBlockRx.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
         }
 
-        // ── Inline (traité après les blocs) ───────────────────────────────────
+        // ── Inline ────────────────────────────────────────────────────────────
         let inlinePatterns: [(String, String)] = [
             ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"),
             ("___(.+?)___",             "$1"),
             ("\\*\\*(.+?)\\*\\*",       "$1"),
             ("__(.+?)__",               "$1"),
-            // backtick simple — lookahead/lookbehind pour éviter ```
             ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", "$1"),
             ("\\*([^*\\n]+)\\*",        "$1"),
             ("_([^_\\n]+)_",            "$1"),

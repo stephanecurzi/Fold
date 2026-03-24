@@ -3,6 +3,7 @@ import Observation
 
 private let readableExtensions = ["md", "txt", "text", "markdown", "mdown", "mkd", "rst", "fountain", "tex", "org"]
 private let bookmarksKey = "fold.folderBookmarks"
+private let fileLimit    = 500
 
 struct FolderItem: Identifiable, Equatable {
     let id: UUID
@@ -17,6 +18,7 @@ struct OpenFolder: Identifiable, Equatable {
     let id: UUID
     let url: URL
     var documents: [FolderItem]
+    var warning: String?                          // ← message si limite atteinte
     var name: String { url.lastPathComponent }
     static func == (lhs: OpenFolder, rhs: OpenFolder) -> Bool { lhs.url == rhs.url }
 }
@@ -32,10 +34,12 @@ final class FolderStore {
     // MARK: - Public
 
     func addFolder(url: URL) {
+        let (docs, warning) = loadDocuments(from: url)
         if let idx = folders.firstIndex(where: { $0.url == url }) {
-            folders[idx].documents = loadDocuments(from: url)
+            folders[idx].documents = docs
+            folders[idx].warning   = warning
         } else {
-            folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
+            folders.append(OpenFolder(id: UUID(), url: url, documents: docs, warning: warning))
         }
         persistFolders()
     }
@@ -47,7 +51,9 @@ final class FolderStore {
 
     func refreshAll() {
         for i in folders.indices {
-            folders[i].documents = loadDocuments(from: folders[i].url)
+            let (docs, warning) = loadDocuments(from: folders[i].url)
+            folders[i].documents = docs
+            folders[i].warning   = warning
         }
     }
 
@@ -77,34 +83,50 @@ final class FolderStore {
             let accessing = url.startAccessingSecurityScopedResource()
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             if FileManager.default.fileExists(atPath: url.path) {
-                folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
+                let (docs, warning) = loadDocuments(from: url)
+                folders.append(OpenFolder(id: UUID(), url: url, documents: docs, warning: warning))
             }
         }
     }
 
-    // MARK: - Load documents
+    // MARK: - Chargement récursif des documents
 
-    private func loadDocuments(from url: URL) -> [FolderItem] {
+    /// Parcourt récursivement `url` (sous-dossiers inclus), limite à `fileLimit` fichiers.
+    /// Retourne les items triés + un message d'avertissement si la limite est atteinte.
+    private func loadDocuments(from url: URL) -> ([FolderItem], String?) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-        let urls = (try? FileManager.default.contentsOfDirectory(
+        guard let enumerator = FileManager.default.enumerator(
             at: url,
-            includingPropertiesForKeys: [.contentModificationDateKey],
-            options: .skipsHiddenFiles
-        )) ?? []
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return ([], nil) }
 
-        return urls
-            .filter { readableExtensions.contains($0.pathExtension.lowercased()) }
-            .compactMap { fileURL -> FolderItem? in
-                guard let content = try? String(contentsOf: fileURL, encoding: .utf8),
-                      let attrs   = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
-                      let date    = attrs.contentModificationDate
-                else { return nil }
-                return FolderItem(id: UUID(), title: fileURL.deletingPathExtension().lastPathComponent,
-                                  content: content, fileURL: fileURL, updatedAt: date)
-            }
-            .sorted { $0.updatedAt > $1.updatedAt }
+        var items: [FolderItem] = []
+        var truncated = false
+
+        for case let fileURL as URL in enumerator {
+            guard readableExtensions.contains(fileURL.pathExtension.lowercased()) else { continue }
+            if items.count >= fileLimit { truncated = true; break }
+            guard let content = try? String(contentsOf: fileURL, encoding: .utf8),
+                  let attrs   = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
+                  let date    = attrs.contentModificationDate
+            else { continue }
+            items.append(FolderItem(
+                id: UUID(),
+                title: fileURL.deletingPathExtension().lastPathComponent,
+                content: content,
+                fileURL: fileURL,
+                updatedAt: date
+            ))
+        }
+
+        let warning: String? = truncated
+            ? "Limite de \(fileLimit) fichiers atteinte — seuls les \(fileLimit) plus récents sont affichés."
+            : nil
+
+        return (items.sorted { $0.updatedAt > $1.updatedAt }, warning)
     }
 }
 

@@ -3,6 +3,7 @@ import SwiftUI
 struct PreferencesView: View {
     @Environment(PreferencesStore.self) var prefs
 
+    // 18 apparaît comme "Défaut" — on le retire de la liste normale
     let sizes: [CGFloat] = [11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 32]
 
     var body: some View {
@@ -21,9 +22,9 @@ struct PreferencesView: View {
                     }
 
                     Picker("Taille de base", selection: $prefs.fontSize) {
-                        Text("Défaut (16 px)").tag(CGFloat(16))
+                        Text("Défaut (18 px)").tag(CGFloat(18))   // ← 18 px par défaut
                         Divider()
-                        ForEach(sizes.filter { $0 != 16 }, id: \.self) { size in
+                        ForEach(sizes.filter { $0 != 18 }, id: \.self) { size in
                             Text("\(Int(size)) px").tag(size)
                         }
                     }
@@ -44,8 +45,6 @@ struct PreferencesView: View {
                     }
                     .padding(.vertical, 4)
                 }
-
-
             }
             .formStyle(.grouped)
             .tabItem {
@@ -56,3 +55,4 @@ struct PreferencesView: View {
         .frame(width: 480, height: 420)
     }
 }
+

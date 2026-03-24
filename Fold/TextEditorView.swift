@@ -379,6 +379,93 @@ final class CenteredTextView: NSTextView {
         Self.rxCache[pattern] = r
         return r
     }
+
+    // MARK: - Markdown Tooltip
+
+    private var mdTooltipWork: DispatchWorkItem?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        ))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        toolTip = nil
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+
+        let ptInView = convert(event.locationInWindow, from: nil)
+        let ptInContainer = NSPoint(x: ptInView.x - textContainerOrigin.x,
+                                    y: ptInView.y - textContainerOrigin.y)
+        guard let lm = layoutManager, let tc = textContainer else { toolTip = nil; return }
+
+        let idx = lm.characterIndex(for: ptInContainer, in: tc,
+                                    fractionOfDistanceBetweenInsertionPoints: nil)
+        let ns = string as NSString
+        guard idx < ns.length else { toolTip = nil; return }
+
+        // 1. Détection bloc (ligne brute)
+        let line = ns.substring(with: ns.lineRange(for: NSRange(location: idx, length: 0)))
+        var label = Self.mdBlockLabel(for: line)
+
+        // 2. Détection inline via attributs NSTextStorage
+        if label == nil, let ts = textStorage {
+            var effRange = NSRange()
+            let attrs = ts.attributes(at: idx, effectiveRange: &effRange)
+            label = Self.mdInlineLabel(for: attrs)
+        }
+
+        toolTip = label
+    }
+
+    // ── Bloc ──────────────────────────────────────────────────────────────────
+
+    private static func mdBlockLabel(for line: String) -> String? {
+        if line.hasPrefix("###### ") || line.hasPrefix("######\t") { return "Entête H6" }
+        if line.hasPrefix("##### ")  || line.hasPrefix("#####\t")  { return "Entête H5" }
+        if line.hasPrefix("#### ")   || line.hasPrefix("####\t")   { return "Entête H4" }
+        if line.hasPrefix("### ")    || line.hasPrefix("###\t")    { return "Entête H3" }
+        if line.hasPrefix("## ")     || line.hasPrefix("##\t")     { return "Entête H2" }
+        if line.hasPrefix("# ")      || line.hasPrefix("#\t")      { return "Entête H1" }
+        if line.hasPrefix("> ") || line.hasPrefix(">\t")           { return "Citation" }
+        if line.hasPrefix("```")                                    { return "Bloc de code" }
+        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.count >= 3 && (t.allSatisfy { $0 == "-" } ||
+                            t.allSatisfy { $0 == "*" } ||
+                            t.allSatisfy { $0 == "_" })            { return "Séparateur" }
+        if line.range(of: #"^\s*- \[x\] "#, options: .regularExpression) != nil { return "Tâche terminée" }
+        if line.range(of: #"^\s*- \[ \] "#, options: .regularExpression) != nil { return "Tâche" }
+        if line.range(of: #"^\s*\d+\. "#,   options: .regularExpression) != nil { return "Liste numérotée" }
+        if line.range(of: #"^\s*[-*+] "#,   options: .regularExpression) != nil { return "Liste" }
+        return nil
+    }
+
+    // ── Inline ────────────────────────────────────────────────────────────────
+
+    private static func mdInlineLabel(for attrs: [NSAttributedString.Key: Any]) -> String? {
+        if attrs[.link] != nil                                              { return "Lien" }
+        if attrs[NSAttributedString.Key("fold.blockquote")] != nil         { return "Citation" }
+        if let fg = attrs[.foregroundColor] as? NSColor,
+           fg.isEqual(to: NSColor.clear)                                   { return nil }
+        if let font = attrs[.font] as? NSFont {
+            let traits = font.fontDescriptor.symbolicTraits
+            if font.fontDescriptor.symbolicTraits.contains(.monoSpace)     { return "Code inline" }
+            if traits.contains(.bold) && traits.contains(.italic)          { return "Gras & Italique" }
+            if traits.contains(.bold)                                      { return "Gras" }
+            if traits.contains(.italic)                                    { return "Italique" }
+        }
+        if attrs[.strikethroughStyle] != nil                               { return "Texte barré" }
+        return nil
+    }
 }
 
 // MARK: - FoldLayoutManager — barre verticale gauche pour les citations
@@ -460,5 +547,6 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
+
 
 

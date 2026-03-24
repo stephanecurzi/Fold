@@ -209,6 +209,20 @@ final class MarkdownTextStorage: NSTextStorage {
         ])
         // ── #hashtags ─────────────────────────────────
         inlineHashtags(text)
+        // ── Couleurs HEX (#RRGGBB / #RGB) ────────────
+        inlineHexColors(text, full)
+    }
+
+    private func inlineHexColors(_ text: String, _ full: NSRange) {
+        // Correspond à #RGB (3 chiffres) ou #RRGGBB (6 chiffres), insensible à la casse
+        rx(#"#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b"#).enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
+            guard let self, let m else { return }
+            let r = m.range(at: 0)
+            guard valid(r) else { return }
+            let hexStr = (text as NSString).substring(with: r)
+            guard let color = NSColor(hex: hexStr) else { return }
+            backing.addAttribute(.foregroundColor, value: color, range: r)
+        }
     }
 
     // MARK: - Tag line colors
@@ -270,8 +284,10 @@ final class MarkdownTextStorage: NSTextStorage {
             if tagRx.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) != nil {
                 let lineRange = NSRange(location: offset, length: lineLen)
                 if valid(lineRange) {
+                    let tagColor = NSColor(hex: currentTagColors?[tag] ?? "")
+                                   ?? NSColor.systemOrange
                     backing.addAttribute(.backgroundColor,
-                                         value: NSColor.systemOrange.withAlphaComponent(0.12),
+                                         value: tagColor.withAlphaComponent(0.10),
                                          range: lineRange)
                 }
             }
@@ -449,4 +465,5 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
+
 

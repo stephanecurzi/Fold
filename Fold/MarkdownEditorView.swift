@@ -1,15 +1,5 @@
-//
-//  MarkdownEditorView.swift
-//  Fold
-//
-//  Created by Stephane Curzi on 2026-03-19.
-//
-
-
 import SwiftUI
 import AppKit
-
-// MarkdownTextStorage est défini dans MarkdownTextStorage.swift
 
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
@@ -91,7 +81,8 @@ final class FoldTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48 && !event.modifierFlags.contains(.shift) {
-            insertText("  ", replacementRange: selectedRange())
+            // Tab → tabulation réelle (pas des espaces)
+            insertText("\t", replacementRange: selectedRange())
         } else {
             super.keyDown(with: event)
         }
@@ -122,3 +113,4 @@ final class FoldTextView: NSTextView {
         needsDisplay = true
     }
 }
+

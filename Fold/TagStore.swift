@@ -19,11 +19,13 @@ final class TagStore {
 
     init() {
         load()
-        // Ajoute les étiquettes par défaut si pas encore configurées
+        // Force les couleurs par défaut (corrige les valeurs obsolètes en UserDefaults)
         for (tag, color) in defaultTags {
-            if tagColors[tag] == nil {
-                tagColors[tag] = color
-            }
+            tagColors[tag] = color
+        }
+        // Ajoute les nouvelles étiquettes personnalisées sans écraser
+        for (tag, color) in tagColors where defaultTags[tag] == nil {
+            if tagColors[tag] == nil { tagColors[tag] = color }
         }
         save()
     }
@@ -105,3 +107,4 @@ import SwiftUI
 extension Color {
     init(hex: String) { self.init(nsColor: NSColor(hex: hex) ?? .secondaryLabelColor) }
 }
+
