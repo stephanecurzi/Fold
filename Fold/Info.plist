@@ -5,8 +5,6 @@
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
-			<key>CFBundleTypeIconSystemGenerated</key>
-			<true/>
 			<key>CFBundleTypeName</key>
 			<string>Fold Document</string>
 			<key>CFBundleTypeRole</key>
@@ -16,13 +14,12 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.fold.markdown</string>
-				<string>public.plain-text</string>
 			</array>
 			<key>NSUbiquitousDocumentUserActivityType</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).document</string>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER).exampledocument</string>
 		</dict>
 	</array>
-	<key>UTExportedTypeDeclarations</key>
+	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
 			<key>UTTypeConformsTo</key>
@@ -39,12 +36,7 @@
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>md</string>
-					<string>txt</string>
-					<string>markdown</string>
-					<string>text</string>
-					<string>mdown</string>
-					<string>mkd</string>
+					<string>exampledocument</string>
 				</array>
 			</dict>
 		</dict>

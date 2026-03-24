@@ -2,11 +2,10 @@
 //  FoldTests.swift
 //  FoldTests
 //
-//  Created by Stephane Curzi on 2026-03-15.
+//  Created by Stephane Curzi on 2026-03-24.
 //
 
 import Testing
-@testable import Fold
 
 struct FoldTests {
 
