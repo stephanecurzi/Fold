@@ -54,34 +54,6 @@
     {
       "layers" : [
         {
-          "fill" : {
-            "automatic-gradient" : "extended-gray:0.00000,1.00000"
-          },
-          "glass" : false,
-          "image-name" : "App Icon Template6.png",
-          "name" : "App Icon Template6",
-          "opacity" : 0.05,
-          "position" : {
-            "scale" : 1,
-            "translation-in-points" : [
-              -60,
-              0
-            ]
-          }
-        }
-      ],
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
-      }
-    },
-    {
-      "layers" : [
-        {
           "image-name" : "App Icon Template.png",
           "name" : "App Icon Template",
           "opacity" : 0.25
@@ -116,11 +88,27 @@
           "hidden" : false,
           "image-name" : "App Icon Template2.png",
           "name" : "App Icon Template2",
-          "opacity" : 0.2,
+          "opacity" : 0.35,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
               0,
+              0
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "automatic-gradient" : "extended-gray:0.00000,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "App Icon Template6.png",
+          "name" : "App Icon Template6",
+          "opacity" : 0.05,
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -60,
               0
             ]
           }
