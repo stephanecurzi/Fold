@@ -5,13 +5,18 @@ struct SidebarView: View {
     @Environment(TagStore.self) var tagStore
     var currentDocumentTags: [String] = []
     @Binding var activeTag: String?
+    var isCurrentDocumentEmpty: Bool = false
 
     var body: some View {
         List {
             // ── Section Dossiers ───────────────────────
             Section {
                 ForEach(folderStore.folders) { folder in
-                    FolderRowView(folder: folder, folderStore: folderStore)
+                    FolderRowView(
+                        folder: folder,
+                        folderStore: folderStore,
+                        isCurrentDocumentEmpty: isCurrentDocumentEmpty
+                    )
                 }
             } header: {
                 Text("Dossiers")
@@ -70,6 +75,7 @@ struct SidebarView: View {
 struct FolderRowView: View {
     let folder: OpenFolder
     let folderStore: FolderStore
+    var isCurrentDocumentEmpty: Bool = false
 
     @State private var isExpanded = true
     @State private var isHovered  = false
@@ -77,7 +83,7 @@ struct FolderRowView: View {
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             ForEach(folder.documents) { doc in
-                DocRowView(doc: doc)
+                DocRowView(doc: doc, isCurrentDocumentEmpty: isCurrentDocumentEmpty)
             }
         } label: {
             HStack(spacing: 6) {
@@ -117,6 +123,8 @@ struct FolderRowView: View {
 
 struct DocRowView: View {
     let doc: FolderItem
+    var isCurrentDocumentEmpty: Bool = false
+
     @State private var isHovered = false
 
     var body: some View {
@@ -148,14 +156,20 @@ struct DocRowView: View {
             existing.showWindows()
             return
         }
-        // Sinon, ouvre le fichier dans Fold via NSDocumentController
+
+        // Retient la fenêtre courante si elle affiche un document vide —
+        // on la fermera après l'ouverture du nouveau document.
+        let emptyWindowToClose: NSWindow? = isCurrentDocumentEmpty ? NSApp.keyWindow : nil
+
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { doc, _, error in
             if let error {
-                // Fallback : ouvre avec l'app par défaut si Fold ne peut pas gérer le type
                 NSWorkspace.shared.open(url)
                 print("Fold openDocument error: \(error.localizedDescription)")
+                return
             }
             doc?.showWindows()
+            // Ferme la fenêtre vide maintenant que le nouveau document est affiché
+            emptyWindowToClose?.close()
         }
     }
 }
@@ -188,7 +202,6 @@ struct TagRowView: View {
             Circle()
                 .fill(tagStore.swiftUIColor(for: tag))
                 .frame(width: 10, height: 10)
-                .help("Modifier la couleur de @\(tag)")
                 .onTapGesture { showPicker = true }
                 .popover(isPresented: $showPicker, arrowEdge: .trailing) {
                     TagColorPicker(tag: tag, tagStore: tagStore)
@@ -199,7 +212,7 @@ struct TagRowView: View {
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isActive
-                    ? tagStore.swiftUIColor(for: tag).opacity(0.10)
+                    ? Color.accentColor.opacity(0.15)
                     : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
         )
         .contentShape(Rectangle())
@@ -225,6 +238,10 @@ struct TagColorPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("Couleur de \"\(tag)\"")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 6), count: 6), spacing: 6) {
                 ForEach(palette, id: \.self) { hex in
                     ZStack {
@@ -248,3 +265,4 @@ struct TagColorPicker: View {
         .frame(width: 240)
     }
 }
+

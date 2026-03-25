@@ -14,18 +14,22 @@ struct ContentView: View {
     // Évite le redimensionnement au premier rendu
     @State private var sidebarResizeReady = false
 
-    private let sidebarWidth:   CGFloat = 240
-    private let minEditorWidth: CGFloat = 520   // largeur min pour l'éditeur seul
+    private let sidebarWidth: CGFloat = 240
 
     private var currentTags: [String] {
         TagStore.extract(from: document.text)
+    }
+
+    private var isDocumentEmpty: Bool {
+        document.text.isEmpty
     }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 currentDocumentTags: currentTags,
-                activeTag: $activeTag
+                activeTag: $activeTag,
+                isCurrentDocumentEmpty: isDocumentEmpty
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: sidebarWidth)
         } detail: {
@@ -42,6 +46,7 @@ struct ContentView: View {
         .onAppear {
             columnVisibility = .detailOnly
             activeTag = nil
+            // Arme le resize après le premier layout
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                 sidebarResizeReady = true
             }
@@ -69,13 +74,9 @@ struct ContentView: View {
         guard wasVisible != isVisible else { return }
 
         var frame = window.frame
-
         if isVisible {
-            // N'agrandit que si la fenêtre n'est pas déjà assez large
-            guard frame.width < sidebarWidth + minEditorWidth else { return }
             frame.size.width += sidebarWidth
         } else {
-            // Rétrécit uniquement si on avait agrandi pour la sidebar
             frame.size.width -= sidebarWidth
             if let screen = window.screen {
                 let maxX = screen.visibleFrame.maxX
