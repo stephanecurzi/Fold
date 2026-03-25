@@ -15,15 +15,36 @@
 			<array>
 				<string>com.fold.markdown</string>
 			</array>
-			<key>NSUbiquitousDocumentUserActivityType</key>
-			<string>$(PRODUCT_BUNDLE_IDENTIFIER).exampledocument</string>
+		</dict>
+		<dict>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>md</string>
+				<string>txt</string>
+				<string>markdown</string>
+				<string>rst</string>
+				<string>fountain</string>
+				<string>org</string>
+			</array>
+			<key>CFBundleTypeName</key>
+			<string>Markdown File</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.daringfireball.markdown</string>
+				<string>public.plain-text</string>
+			</array>
 		</dict>
 	</array>
-	<key>UTImportedTypeDeclarations</key>
+	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
 			<key>UTTypeConformsTo</key>
 			<array>
+				<string>net.daringfireball.markdown</string>
 				<string>public.plain-text</string>
 			</array>
 			<key>UTTypeDescription</key>
@@ -36,7 +57,9 @@
 			<dict>
 				<key>public.filename-extension</key>
 				<array>
-					<string>exampledocument</string>
+					<string>md</string>
+					<string>markdown</string>
+					<string>txt</string>
 				</array>
 			</dict>
 		</dict>

@@ -20,16 +20,11 @@ struct ContentView: View {
         TagStore.extract(from: document.text)
     }
 
-    private var isDocumentEmpty: Bool {
-        document.text.isEmpty
-    }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 currentDocumentTags: currentTags,
-                activeTag: $activeTag,
-                isCurrentDocumentEmpty: isDocumentEmpty
+                activeTag: $activeTag
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: sidebarWidth)
         } detail: {
@@ -75,9 +70,12 @@ struct ContentView: View {
 
         var frame = window.frame
         if isVisible {
+            // Sidebar apparaît → agrandir
             frame.size.width += sidebarWidth
         } else {
+            // Sidebar disparaît → rétrécir
             frame.size.width -= sidebarWidth
+            // Garde la fenêtre dans les limites de l'écran
             if let screen = window.screen {
                 let maxX = screen.visibleFrame.maxX
                 if frame.maxX > maxX { frame.origin.x = maxX - frame.width }
@@ -86,4 +84,3 @@ struct ContentView: View {
         window.setFrame(frame, display: true, animate: true)
     }
 }
-

@@ -25,7 +25,7 @@ final class PreferencesStore {
     init() {
         fontName = UserDefaults.standard.string(forKey: fontNameKey) ?? "SF Pro Text"
         let saved = UserDefaults.standard.double(forKey: fontSizeKey)
-        fontSize = saved > 0 ? CGFloat(saved) : 16
+        fontSize = saved > 0 ? CGFloat(saved) : 18
     }
 
     var bodyFont: NSFont {
@@ -50,7 +50,7 @@ final class PreferencesStore {
 
     func zoomIn()    { if fontSize < 32 { fontSize += 1 } }
     func zoomOut()   { if fontSize > 10 { fontSize -= 1 } }
-    func zoomReset() { fontSize = 16 }
+    func zoomReset() { fontSize = 18 }
 
     // Polices disponibles filtrées — lisibles pour du texte
     var availableFonts: [String] {

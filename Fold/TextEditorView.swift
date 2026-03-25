@@ -22,7 +22,10 @@ struct TextEditorView: View {
                 tagColorProvider: { tagStore.color(for: $0) }
             )
             if let tag = activeTag {
-                ActiveTagPill(tag: tag) {
+                ActiveTagPill(
+                    tag: tag,
+                    color: tagStore.swiftUIColor(for: tag)
+                ) {
                     withAnimation(.spring(duration: 0.3)) { activeTag = nil }
                 }
                 .padding(.bottom, 24)
@@ -38,13 +41,14 @@ struct TextEditorView: View {
 
 struct ActiveTagPill: View {
     let tag: String
+    let color: Color
     let onDismiss: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "tag.fill")
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.orange)
+                .foregroundStyle(color)
             Text(tag)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.primary)
@@ -121,7 +125,6 @@ struct CenteredEditorView: NSViewRepresentable {
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
 
-        // Sélection en orange plutôt que bleu système
         textView.selectedTextAttributes = [
             .backgroundColor: NSColor.systemOrange.withAlphaComponent(0.28),
             .foregroundColor: NSColor.labelColor
@@ -168,7 +171,6 @@ struct CenteredEditorView: NSViewRepresentable {
             parent.text = tv.string
         }
 
-        /// Ouvre les liens au clic (Cmd+Clic dans une NSTextView éditable).
         func textView(_ tv: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             if let url = link as? URL {
                 NSWorkspace.shared.open(url)
@@ -181,8 +183,6 @@ struct CenteredEditorView: NSViewRepresentable {
             return false
         }
 
-        /// Met à jour le cursorRange dans le storage et re-highlight
-        /// pour afficher/masquer les marqueurs Markdown selon la position du curseur.
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView,
                   let s = tv.textStorage as? MarkdownTextStorage else { return }
@@ -190,7 +190,6 @@ struct CenteredEditorView: NSViewRepresentable {
             guard s.cursorRange.location != newRange.location
                     || s.cursorRange.length != newRange.length else { return }
             s.cursorRange = newRange
-            // Déclenche un re-highlight via le mécanisme standard du NSTextStorage
             s.beginEditing()
             s.edited(.editedAttributes,
                      range: NSRange(location: 0, length: s.length),
@@ -238,8 +237,6 @@ final class CenteredTextView: NSTextView {
     @objc private func onPrev(_:    Notification) { find(.previousMatch)        }
     @objc private func onHide(_:    Notification) { find(.hideFindInterface)    }
 
-    /// Reçoit la notification de changement de préférences (taille/police)
-    /// et force un re-highlight immédiat sans attendre le cycle SwiftUI.
     @objc private func onPrefsChanged(_ n: Notification) {
         guard let prefs = n.object as? PreferencesStore,
               let s = textStorage as? MarkdownTextStorage else { return }
@@ -249,6 +246,65 @@ final class CenteredTextView: NSTextView {
                  range: NSRange(location: 0, length: s.length),
                  changeInLength: 0)
         s.endEditing()
+    }
+
+    // MARK: - Typographie française
+
+    override func insertText(_ string: Any, replacementRange: NSRange) {
+        guard let input = string as? String else {
+            super.insertText(string, replacementRange: replacementRange)
+            return
+        }
+
+        let cursorPos = replacementRange.location != NSNotFound
+            ? replacementRange.location
+            : selectedRange().location
+
+        guard !isInsideCodeSpan(at: cursorPos) else {
+            super.insertText(string, replacementRange: replacementRange)
+            return
+        }
+
+        var result = input
+
+        // Apostrophe droite → apostrophe typographique
+        result = result.replacingOccurrences(of: "'", with: "\u{2019}")
+
+        // Guillemets doubles → guillemets français avec espace fine insécable
+        if result == "\"" {
+            result = isOpeningContext(at: cursorPos)
+                ? "«\u{202F}"
+                : "\u{202F}»"
+        }
+
+        super.insertText(result, replacementRange: replacementRange)
+    }
+
+    private func isOpeningContext(at pos: Int) -> Bool {
+        guard pos > 0 else { return true }
+        let str = string as NSString
+        guard pos <= str.length else { return true }
+        let prevChar = str.character(at: pos - 1)
+        let openingSet = CharacterSet.whitespaces
+            .union(.newlines)
+            .union(CharacterSet(charactersIn: "([{\"'«—-"))
+        guard let scalar = Unicode.Scalar(prevChar) else { return true }
+        return openingSet.contains(scalar)
+    }
+
+    private func isInsideCodeSpan(at pos: Int) -> Bool {
+        let str = string as NSString
+        let lineRange = str.lineRange(for: NSRange(location: min(pos, str.length), length: 0))
+        let line = str.substring(with: lineRange)
+        let localPos = pos - lineRange.location
+        var inCode = false
+        var charIndex = 0
+        for ch in line {
+            if charIndex == localPos { return inCode }
+            if ch == "`" { inCode.toggle() }
+            charIndex += 1
+        }
+        return false
     }
 
     // MARK: - Mise en page
@@ -269,8 +325,8 @@ final class CenteredTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 48 where !event.modifierFlags.contains(.shift):
-            // Tab → 2 espaces
-            insertText("  ", replacementRange: selectedRange())
+            // Tab → vrai caractère tabulation
+            insertText("\t", replacementRange: selectedRange())
         case 36:
             // Return → continuation de liste si applicable
             if !handleListContinuation() {
@@ -283,22 +339,18 @@ final class CenteredTextView: NSTextView {
 
     // MARK: - Continuation de liste
 
-    /// Insère automatiquement le préfixe de liste approprié après un Return.
-    /// Retourne true si la liste a été continuée (dans ce cas, ne pas appeler super).
     @discardableResult
     private func handleListContinuation() -> Bool {
         let sel = selectedRange()
         let str = string as NSString
         let lineRange = str.lineRange(for: NSRange(location: sel.location, length: 0))
         var line = str.substring(with: lineRange)
-        // Supprime le \n final pour les patterns
         if line.hasSuffix("\n") { line = String(line.dropLast()) }
         let nsLine = line as NSString
         let lr = NSRange(location: 0, length: nsLine.length)
 
-        // ── Liste de tâches — à tester AVANT la liste non ordonnée ──
+        // ── Liste de tâches ──
         if let m = rx(#"^(\s*)(- \[[ x]\] )(.+)$"#).firstMatch(in: line, range: lr) {
-            // Ligne vide (seulement le marqueur) → supprimer le préfixe
             if m.range(at: 3).length == 0 {
                 insertText("\n", replacementRange: lineRange)
                 return true
@@ -308,7 +360,7 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Liste non ordonnée ────────────────────────
+        // ── Liste non ordonnée ──
         if let m = rx(#"^(\s*)([-*+]) (.+)$"#).firstMatch(in: line, range: lr) {
             let indent = nsLine.substring(with: m.range(at: 1))
             let bullet = nsLine.substring(with: m.range(at: 2))
@@ -316,14 +368,13 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Ligne vide d'une liste non ordonnée → supprimer ──
+        // ── Ligne vide non ordonnée → supprimer ──
         if rx(#"^(\s*)([-*+]) $"#).firstMatch(in: line, range: lr) != nil {
-            // Remplace toute la ligne par un simple saut de ligne
             insertText("\n", replacementRange: lineRange)
             return true
         }
 
-        // ── Liste ordonnée ────────────────────────────
+        // ── Liste ordonnée ──
         if let m = rx(#"^(\s*)(\d+)\. (.+)$"#).firstMatch(in: line, range: lr) {
             let indent  = nsLine.substring(with: m.range(at: 1))
             let numStr  = nsLine.substring(with: m.range(at: 2))
@@ -332,7 +383,7 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Ligne vide d'une liste ordonnée → supprimer ──
+        // ── Ligne vide ordonnée → supprimer ──
         if rx(#"^(\s*)\d+\. $"#).firstMatch(in: line, range: lr) != nil {
             insertText("\n", replacementRange: lineRange)
             return true
@@ -370,7 +421,7 @@ final class CenteredTextView: NSTextView {
         needsDisplay = true
     }
 
-    // MARK: - Regex helper local (liste continuation)
+    // MARK: - Regex helper local
 
     private static var rxCache: [String: NSRegularExpression] = [:]
     private func rx(_ pattern: String) -> NSRegularExpression {
@@ -378,93 +429,6 @@ final class CenteredTextView: NSTextView {
         let r = try! NSRegularExpression(pattern: pattern)
         Self.rxCache[pattern] = r
         return r
-    }
-
-    // MARK: - Markdown Tooltip
-
-    private var mdTooltipWork: DispatchWorkItem?
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        for area in trackingAreas { removeTrackingArea(area) }
-        addTrackingArea(NSTrackingArea(
-            rect: .zero,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        ))
-    }
-
-    override func mouseExited(with event: NSEvent) {
-        super.mouseExited(with: event)
-        toolTip = nil
-    }
-
-    override func mouseMoved(with event: NSEvent) {
-        super.mouseMoved(with: event)
-
-        let ptInView = convert(event.locationInWindow, from: nil)
-        let ptInContainer = NSPoint(x: ptInView.x - textContainerOrigin.x,
-                                    y: ptInView.y - textContainerOrigin.y)
-        guard let lm = layoutManager, let tc = textContainer else { toolTip = nil; return }
-
-        let idx = lm.characterIndex(for: ptInContainer, in: tc,
-                                    fractionOfDistanceBetweenInsertionPoints: nil)
-        let ns = string as NSString
-        guard idx < ns.length else { toolTip = nil; return }
-
-        // 1. Détection bloc (ligne brute)
-        let line = ns.substring(with: ns.lineRange(for: NSRange(location: idx, length: 0)))
-        var label = Self.mdBlockLabel(for: line)
-
-        // 2. Détection inline via attributs NSTextStorage
-        if label == nil, let ts = textStorage {
-            var effRange = NSRange()
-            let attrs = ts.attributes(at: idx, effectiveRange: &effRange)
-            label = Self.mdInlineLabel(for: attrs)
-        }
-
-        toolTip = label
-    }
-
-    // ── Bloc ──────────────────────────────────────────────────────────────────
-
-    private static func mdBlockLabel(for line: String) -> String? {
-        if line.hasPrefix("###### ") || line.hasPrefix("######\t") { return "Entête H6" }
-        if line.hasPrefix("##### ")  || line.hasPrefix("#####\t")  { return "Entête H5" }
-        if line.hasPrefix("#### ")   || line.hasPrefix("####\t")   { return "Entête H4" }
-        if line.hasPrefix("### ")    || line.hasPrefix("###\t")    { return "Entête H3" }
-        if line.hasPrefix("## ")     || line.hasPrefix("##\t")     { return "Entête H2" }
-        if line.hasPrefix("# ")      || line.hasPrefix("#\t")      { return "Entête H1" }
-        if line.hasPrefix("> ") || line.hasPrefix(">\t")           { return "Citation" }
-        if line.hasPrefix("```")                                    { return "Bloc de code" }
-        let t = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        if t.count >= 3 && (t.allSatisfy { $0 == "-" } ||
-                            t.allSatisfy { $0 == "*" } ||
-                            t.allSatisfy { $0 == "_" })            { return "Séparateur" }
-        if line.range(of: #"^\s*- \[x\] "#, options: .regularExpression) != nil { return "Tâche terminée" }
-        if line.range(of: #"^\s*- \[ \] "#, options: .regularExpression) != nil { return "Tâche" }
-        if line.range(of: #"^\s*\d+\. "#,   options: .regularExpression) != nil { return "Liste numérotée" }
-        if line.range(of: #"^\s*[-*+] "#,   options: .regularExpression) != nil { return "Liste" }
-        return nil
-    }
-
-    // ── Inline ────────────────────────────────────────────────────────────────
-
-    private static func mdInlineLabel(for attrs: [NSAttributedString.Key: Any]) -> String? {
-        if attrs[.link] != nil                                              { return "Lien" }
-        if attrs[NSAttributedString.Key("fold.blockquote")] != nil         { return "Citation" }
-        if let fg = attrs[.foregroundColor] as? NSColor,
-           fg.isEqual(to: NSColor.clear)                                   { return nil }
-        if let font = attrs[.font] as? NSFont {
-            let traits = font.fontDescriptor.symbolicTraits
-            if font.fontDescriptor.symbolicTraits.contains(.monoSpace)     { return "Code inline" }
-            if traits.contains(.bold) && traits.contains(.italic)          { return "Gras & Italique" }
-            if traits.contains(.bold)                                      { return "Gras" }
-            if traits.contains(.italic)                                    { return "Italique" }
-        }
-        if attrs[.strikethroughStyle] != nil                               { return "Texte barré" }
-        return nil
     }
 }
 
@@ -485,9 +449,6 @@ final class FoldLayoutManager: NSLayoutManager {
                  storage: storage, container: container, origin: origin)
     }
 
-    /// Parcourt la plage caractère par caractère en sautant de run en run,
-    /// groupe les lignes consécutives marquées avec `key`, et dessine
-    /// une seule barre continue par groupe.
     private func drawBars(for key: NSAttributedString.Key,
                           color: NSColor,
                           in charRange: NSRange,
@@ -495,9 +456,7 @@ final class FoldLayoutManager: NSLayoutManager {
                           container: NSTextContainer,
                           origin: NSPoint) {
 
-        // 1. Collecter les line-fragment rects de chaque ligne marquée
         var markedRects: [CGRect] = []
-
         var pos = charRange.location
         let end = charRange.location + charRange.length
 
@@ -506,9 +465,7 @@ final class FoldLayoutManager: NSLayoutManager {
             let value = storage.attribute(key, at: pos, longestEffectiveRange: &effectiveRange,
                                           in: charRange)
             let runEnd = min(effectiveRange.location + effectiveRange.length, end)
-
             if value != nil {
-                // Toutes les lignes de cette plage sont marquées
                 let glRange = glyphRange(forCharacterRange: NSRange(location: pos, length: runEnd - pos),
                                          actualCharacterRange: nil)
                 enumerateLineFragments(forGlyphRange: glRange) { rect, _, _, _, _ in
@@ -518,8 +475,6 @@ final class FoldLayoutManager: NSLayoutManager {
             pos = runEnd
         }
 
-        // 2. Fusionner les rects consécutifs (adjacents verticalement) en groupes
-        //    et dessiner une barre par groupe
         guard !markedRects.isEmpty else { return }
 
         let barX = origin.x + container.lineFragmentPadding + barInset
@@ -536,7 +491,6 @@ final class FoldLayoutManager: NSLayoutManager {
 
         for i in 1..<markedRects.count {
             let current = markedRects[i]
-            // Adjacent si le haut du rect suivant touche (ou chevauche) le bas du groupe courant
             if abs(current.minY - groupRect.maxY) < 2 {
                 groupRect = groupRect.union(current)
             } else {
@@ -547,6 +501,4 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
-
-
 

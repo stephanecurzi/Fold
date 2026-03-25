@@ -25,7 +25,7 @@ final class MarkdownTextStorage: NSTextStorage {
 
     // MARK: - Fonts
 
-    private var fontSize: CGFloat { preferences?.fontSize ?? 16 }
+    private var fontSize: CGFloat { preferences?.fontSize ?? 18 }
     private var bodyFont: NSFont  { preferences?.bodyFont ?? .systemFont(ofSize: fontSize) }
     private var monoFont: NSFont  { .monospacedSystemFont(ofSize: fontSize - 1, weight: .regular) }
 
@@ -104,7 +104,7 @@ final class MarkdownTextStorage: NSTextStorage {
             return
         }
 
-        // ── HR — couleur texte de base ─────────────────
+        // ── HR ─────────────────────────────────────────
         if rx(#"^(---+|\*\*\*+|___+)\s*$"#).firstMatch(in: line, range: lineRange) != nil {
             let hrStyle = NSMutableParagraphStyle()
             hrStyle.alignment   = .center
@@ -117,7 +117,7 @@ final class MarkdownTextStorage: NSTextStorage {
             return
         }
 
-        // ── Blockquote — barre verticale gauche (dessinée par FoldLayoutManager) ─
+        // ── Blockquote ─────────────────────────────────
         if let m = rx(#"^(>)([ \t]?)(.*)$"#).firstMatch(in: line, range: lineRange) {
             let markerLen = 1
             let spaceLen  = m.range(at: 2).length
@@ -146,26 +146,63 @@ final class MarkdownTextStorage: NSTextStorage {
             return
         }
 
-        // ── Listes — couleur labelColor ───────────────
-        if let m = rx(#"^(\s*)([-*+])([ \t])"#).firstMatch(in: line, range: lineRange) {
+        // ── Liste de tâches ────────────────────────────
+        // Testée AVANT la liste non ordonnée
+        if let m = rx(#"^(\s*)(- \[([ x])\] )(.*)"#).firstMatch(in: line, range: lineRange) {
+            let indentLen  = m.range(at: 1).length
+            let prefix     = nsLine.substring(with: m.range(at: 2)) // "- [ ] " ou "- [x] "
+            let isDone     = nsLine.substring(with: m.range(at: 3)) == "x"
+            let textRange  = NSRange(location: offset + m.range(at: 4).location,
+                                     length: m.range(at: 4).length)
+            let indent     = measuredWidth(String(repeating: " ", count: indentLen))
+            let textIndent = indent + measuredWidth(prefix)
+            let ps = listParagraphStyle(firstLine: indent, wrapped: textIndent)
+            backing.addAttribute(.paragraphStyle, value: ps, range: absLineRange)
+            backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
+                                 range: NSRange(location: offset + indentLen, length: m.range(at: 2).length))
+
+            // Ligne complétée → texte barré + couleur tertiaire
+            if isDone && valid(textRange) {
+                backing.addAttributes([
+                    .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                    .foregroundColor: NSColor.tertiaryLabelColor
+                ], range: textRange)
+            }
+            return
+        }
+
+        // ── Liste non ordonnée ─────────────────────────
+        if let m = rx(#"^(\s*)([-*+])([ \t])(.*)"#).firstMatch(in: line, range: lineRange) {
+            let indentLen  = m.range(at: 1).length
+            let bullet     = nsLine.substring(with: m.range(at: 2))
+            let space      = nsLine.substring(with: m.range(at: 3))
+            let prefix     = bullet + space
+            let indent     = measuredWidth(String(repeating: " ", count: indentLen))
+            let textIndent = indent + measuredWidth(prefix)
+            let ps = listParagraphStyle(firstLine: indent, wrapped: textIndent)
+            backing.addAttribute(.paragraphStyle, value: ps, range: absLineRange)
             backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location, length: 1))
+            return
         }
-        if let m = rx(#"^(\s*)(\d+\.)([ \t])"#).firstMatch(in: line, range: lineRange) {
+
+        // ── Liste ordonnée ─────────────────────────────
+        if let m = rx(#"^(\s*)(\d+\.)([ \t])(.*)"#).firstMatch(in: line, range: lineRange) {
+            let indentLen  = m.range(at: 1).length
+            let num        = nsLine.substring(with: m.range(at: 2))
+            let space      = nsLine.substring(with: m.range(at: 3))
+            let prefix     = num + space
+            let indent     = measuredWidth(String(repeating: " ", count: indentLen))
+            let textIndent = indent + measuredWidth(prefix)
+            let ps = listParagraphStyle(firstLine: indent, wrapped: textIndent)
+            backing.addAttribute(.paragraphStyle, value: ps, range: absLineRange)
             backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + m.range(at: 2).location,
                                                 length: m.range(at: 2).length))
+            return
         }
 
-        // ── Checkbox ──────────────────────────────────
-        if rx(#"^(\s*- \[x\] )"#).firstMatch(in: line, range: lineRange) != nil {
-            backing.addAttributes([
-                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
-                .foregroundColor: NSColor.tertiaryLabelColor
-            ], range: absLineRange)
-        }
-
-        // ── Bloc de code (``` ... ```) — monospace visible ─
+        // ── Bloc de code ───────────────────────────────
         if rx(#"^```"#).firstMatch(in: line, range: lineRange) != nil {
             backing.addAttributes([
                 .font: monoFont,
@@ -174,55 +211,48 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
+    /// Mesure la largeur réelle d'une chaîne avec le body font courant.
+    private func measuredWidth(_ string: String) -> CGFloat {
+        let attrs: [NSAttributedString.Key: Any] = [.font: bodyFont]
+        return (string as NSString).size(withAttributes: attrs).width
+    }
+
+    /// Crée un paragraphStyle avec hanging indent propre pour les listes.
+    private func listParagraphStyle(firstLine: CGFloat, wrapped: CGFloat) -> NSParagraphStyle {
+        let ps = NSMutableParagraphStyle()
+        ps.firstLineHeadIndent = firstLine
+        ps.headIndent          = wrapped
+        ps.lineSpacing         = 4
+        ps.paragraphSpacing    = 2
+        return ps
+    }
+
     // MARK: - Inline Elements
 
     private func applyInline(text: String, in full: NSRange) {
-        // ── Gras + Italique (*** et ___) — en premier ─
         inlineFontMerging(#"\*\*\*(.+?)\*\*\*"#,              text, full, traits: [.boldFontMask, .italicFontMask])
         inlineFontMerging(#"(?<![_])___([^_\n]+)___(?![_])"#, text, full, traits: [.boldFontMask, .italicFontMask])
-        // ── Gras (** et __) ───────────────────────────
         inlineFontMerging(#"\*\*(.+?)\*\*"#,                  text, full, traits: [.boldFontMask])
         inlineFontMerging(#"(?<![_])__([^_\n]+)__(?![_])"#,   text, full, traits: [.boldFontMask])
-        // ── Italique (* et _) ─────────────────────────
         inlineFontMerging(#"(?<![*_])\*([^*\n]+)\*(?![*_])"#, text, full, traits: [.italicFontMask])
         inlineFontMerging(#"(?<![_\w])_([^_\n]+)_(?![_\w])"#, text, full, traits: [.italicFontMask])
-        // ── Code inline — monospace, couleur de base ──
         inline(#"`([^`\n]+)`"#, text, full, attrs: [
             .font: monoFont,
             .foregroundColor: NSColor.labelColor,
             .backgroundColor: NSColor.secondaryLabelColor.withAlphaComponent(0.07)
         ])
-        // ── Barré ─────────────────────────────────────
         inline(#"~~(.+?)~~"#, text, full, attrs: [
             .strikethroughStyle: NSUnderlineStyle.single.rawValue,
             .foregroundColor: NSColor.secondaryLabelColor
         ])
-        // ── Surligné ==texte== → jaune ────────────────
         inline(#"==(.+?)=="#, text, full, attrs: [
             .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.45)
         ])
-        // ── Liens ─────────────────────────────────────
         inlineLinks(text, full)
-        // ── @tags gris tertiaire ──────────────────────
         inlineAll(#"@[\w]+"#, text, full, attrs: [
             .foregroundColor: NSColor.tertiaryLabelColor
         ])
-        // ── #hashtags ─────────────────────────────────
         inlineHashtags(text)
-        // ── Couleurs HEX (#RRGGBB / #RGB) ────────────
-        inlineHexColors(text, full)
-    }
-
-    private func inlineHexColors(_ text: String, _ full: NSRange) {
-        // Correspond à #RGB (3 chiffres) ou #RRGGBB (6 chiffres), insensible à la casse
-        rx(#"#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})\b"#).enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
-            guard let self, let m else { return }
-            let r = m.range(at: 0)
-            guard valid(r) else { return }
-            let hexStr = (text as NSString).substring(with: r)
-            guard let color = NSColor(hex: hexStr) else { return }
-            backing.addAttribute(.foregroundColor, value: color, range: r)
-        }
     }
 
     // MARK: - Tag line colors
@@ -272,6 +302,7 @@ final class MarkdownTextStorage: NSTextStorage {
 
     private func applyTagCollapse(text: String) {
         guard let tag = activeTag else { return }
+        let highlightColor = tagColorProvider?(tag) ?? NSColor.systemOrange
         let escaped = NSRegularExpression.escapedPattern(for: tag)
         guard let tagRx = try? NSRegularExpression(
             pattern: "@" + escaped + #"(?=\s*[.!?]?\s*$)"#,
@@ -284,10 +315,8 @@ final class MarkdownTextStorage: NSTextStorage {
             if tagRx.firstMatch(in: line, range: NSRange(location: 0, length: lineLen)) != nil {
                 let lineRange = NSRange(location: offset, length: lineLen)
                 if valid(lineRange) {
-                    let tagColor = NSColor(hex: currentTagColors?[tag] ?? "")
-                                   ?? NSColor.systemOrange
                     backing.addAttribute(.backgroundColor,
-                                         value: tagColor.withAlphaComponent(0.10),
+                                         value: highlightColor.withAlphaComponent(0.12),
                                          range: lineRange)
                 }
             }
@@ -465,5 +494,4 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
-
 

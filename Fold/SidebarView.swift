@@ -5,18 +5,13 @@ struct SidebarView: View {
     @Environment(TagStore.self) var tagStore
     var currentDocumentTags: [String] = []
     @Binding var activeTag: String?
-    var isCurrentDocumentEmpty: Bool = false
 
     var body: some View {
         List {
             // ── Section Dossiers ───────────────────────
             Section {
                 ForEach(folderStore.folders) { folder in
-                    FolderRowView(
-                        folder: folder,
-                        folderStore: folderStore,
-                        isCurrentDocumentEmpty: isCurrentDocumentEmpty
-                    )
+                    FolderRowView(folder: folder, folderStore: folderStore)
                 }
             } header: {
                 Text("Dossiers")
@@ -75,7 +70,6 @@ struct SidebarView: View {
 struct FolderRowView: View {
     let folder: OpenFolder
     let folderStore: FolderStore
-    var isCurrentDocumentEmpty: Bool = false
 
     @State private var isExpanded = true
     @State private var isHovered  = false
@@ -83,7 +77,7 @@ struct FolderRowView: View {
     var body: some View {
         DisclosureGroup(isExpanded: $isExpanded) {
             ForEach(folder.documents) { doc in
-                DocRowView(doc: doc, isCurrentDocumentEmpty: isCurrentDocumentEmpty)
+                DocRowView(doc: doc)
             }
         } label: {
             HStack(spacing: 6) {
@@ -123,8 +117,6 @@ struct FolderRowView: View {
 
 struct DocRowView: View {
     let doc: FolderItem
-    var isCurrentDocumentEmpty: Bool = false
-
     @State private var isHovered = false
 
     var body: some View {
@@ -151,25 +143,18 @@ struct DocRowView: View {
     }
 
     private func openDoc(_ url: URL) {
-        // Si déjà ouvert, amène la fenêtre au premier plan
+        _ = url.startAccessingSecurityScopedResource()
+
         if let existing = NSDocumentController.shared.document(for: url) {
             existing.showWindows()
             return
         }
-
-        // Retient la fenêtre courante si elle affiche un document vide —
-        // on la fermera après l'ouverture du nouveau document.
-        let emptyWindowToClose: NSWindow? = isCurrentDocumentEmpty ? NSApp.keyWindow : nil
-
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { doc, _, error in
             if let error {
                 NSWorkspace.shared.open(url)
                 print("Fold openDocument error: \(error.localizedDescription)")
-                return
             }
             doc?.showWindows()
-            // Ferme la fenêtre vide maintenant que le nouveau document est affiché
-            emptyWindowToClose?.close()
         }
     }
 }
@@ -212,7 +197,7 @@ struct TagRowView: View {
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isActive
-                    ? Color.accentColor.opacity(0.15)
+                    ? tagStore.swiftUIColor(for: tag).opacity(0.18)
                     : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
         )
         .contentShape(Rectangle())

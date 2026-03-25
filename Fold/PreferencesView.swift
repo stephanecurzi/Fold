@@ -21,9 +21,9 @@ struct PreferencesView: View {
                     }
 
                     Picker("Taille de base", selection: $prefs.fontSize) {
-                        Text("Défaut (16 px)").tag(CGFloat(16))
+                        Text("Défaut (18 px)").tag(CGFloat(18))
                         Divider()
-                        ForEach(sizes.filter { $0 != 16 }, id: \.self) { size in
+                        ForEach(sizes.filter { $0 != 18 }, id: \.self) { size in
                             Text("\(Int(size)) px").tag(size)
                         }
                     }
