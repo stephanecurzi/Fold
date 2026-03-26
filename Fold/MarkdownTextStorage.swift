@@ -253,6 +253,31 @@ final class MarkdownTextStorage: NSTextStorage {
             .foregroundColor: NSColor.tertiaryLabelColor
         ])
         inlineHashtags(text)
+        inlineHexColors(text, full)
+    }
+
+    // MARK: - Hex colors
+
+    private func inlineHexColors(_ text: String, _ full: NSRange) {
+        // Matches #RRGGBB and #RGB not preceded by another # (to avoid heading markers)
+        rx(#"(?<![#\w])(#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3}))(?![\w])"#)
+            .enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
+                guard let self, let m else { return }
+                let r = m.range(at: 1)
+                guard valid(r) else { return }
+                guard let hexStr = Range(r, in: text).map({ String(text[$0]) }),
+                      let color = NSColor(hex: hexStr.count == 4
+                          ? expandShortHex(hexStr)
+                          : hexStr)
+                else { return }
+                backing.addAttribute(.foregroundColor, value: color, range: r)
+            }
+    }
+
+    /// Expands #RGB → #RRGGBB
+    private func expandShortHex(_ hex: String) -> String {
+        let h = hex.dropFirst() // remove #
+        return "#" + h.map { "\($0)\($0)" }.joined()
     }
 
     // MARK: - Tag line colors
@@ -494,4 +519,5 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
+
 

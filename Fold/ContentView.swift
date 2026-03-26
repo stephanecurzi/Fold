@@ -20,7 +20,8 @@ struct ContentView: View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
                 currentDocumentTags: TagStore.extract(from: document.text),
-                activeTag: $activeTag
+                activeTag: $activeTag,
+                columnVisibility: columnVisibility
             )
             .navigationSplitViewColumnWidth(min: 200, ideal: 200)
         } detail: {
@@ -32,15 +33,12 @@ struct ContentView: View {
         .environment(recentStore)
         .environment(searchStore)
         .tint(.orange)
-        .onAppear {
-            activeTag = nil
-        }
+        .onAppear { activeTag = nil }
         .onChange(of: columnVisibility) { _, new in
             let isVisible = (new == .all || new == .doubleColumn)
             UserDefaults.standard.set(isVisible, forKey: sidebarVisibilityKey)
         }
         .onChange(of: document.text) { _, _ in
-            // Retire le tag actif s'il disparaît du document courant
             if let active = activeTag,
                !TagStore.extract(from: document.text).contains(active) {
                 activeTag = nil

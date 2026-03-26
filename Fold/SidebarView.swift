@@ -8,6 +8,7 @@ struct SidebarView: View {
 
     var currentDocumentTags: [String] = []
     @Binding var activeTag: String?
+    var columnVisibility: NavigationSplitViewVisibility = .all
 
     @State private var expandedFolders:  Set<UUID> = []
     @State private var openDocumentURLs: Set<URL>  = []
@@ -72,11 +73,13 @@ struct SidebarView: View {
         .listStyle(.sidebar)
         .navigationTitle("Fold")
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                Button { openFolders() } label: {
-                    Image(systemName: "folder.badge.plus")
+            if columnVisibility != .detailOnly {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { openFolders() } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .help("Ouvrir un dossier")
                 }
-                .help("Ouvrir un dossier")
             }
         }
         .onAppear { refreshOpenURLs() }
