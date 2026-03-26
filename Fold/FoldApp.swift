@@ -1,8 +1,7 @@
-
 import SwiftUI
 import AppKit
 
-// MARK: - Notifications globales (définies ici une seule fois)
+// MARK: - Notifications globales
 
 extension Notification.Name {
     static let foldSearch       = Notification.Name("fold.search")
@@ -16,9 +15,10 @@ extension Notification.Name {
 
 @main
 struct FoldApp: App {
-    @State private var folderStore = FolderStore()
-    @State private var tagStore    = TagStore()
-    @State private var prefs       = PreferencesStore()
+    @State private var folderStore  = FolderStore()
+    @State private var tagStore     = TagStore()
+    @State private var prefs        = PreferencesStore()
+    @State private var recentStore  = RecentStore()
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -30,7 +30,16 @@ struct FoldApp: App {
                 .environment(folderStore)
                 .environment(tagStore)
                 .environment(prefs)
+                .environment(recentStore)
                 .tint(.orange)
+                .onAppear {
+                    // Câble recentStore dans folderStore au premier rendu
+                    folderStore.recentStore = recentStore
+                    // Enregistre le document courant dans les récents
+                    if let url = config.fileURL {
+                        recentStore.add(url)
+                    }
+                }
         }
         .defaultSize(width: 940, height: 680)
         .commands {
@@ -129,14 +138,11 @@ struct FoldApp: App {
 
     // MARK: - Format helpers
 
-    /// Applique un préfixe de ligne à toutes les lignes couvertes par la sélection.
-    /// Si la sélection est vide (curseur seul), traite uniquement la ligne courante.
     private func formatLine(_ prefix: String) {
         guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
         let sel = tv.selectedRange()
         let str = tv.string as NSString
 
-        // Plage couvrant toutes les lignes sélectionnées
         let selectionRange = sel.length > 0 ? sel : str.lineRange(for: sel)
         let firstLineRange = str.lineRange(for: NSRange(location: selectionRange.location, length: 0))
         let lastLineRange  = str.lineRange(for: NSRange(location: max(selectionRange.location,
@@ -145,16 +151,13 @@ struct FoldApp: App {
         let fullRange = NSRange(location: firstLineRange.location,
                                 length: lastLineRange.location + lastLineRange.length - firstLineRange.location)
 
-        // Découpe en lignes et transforme chacune
         let block = str.substring(with: fullRange)
         var lines = block.components(separatedBy: "\n")
 
-        // La dernière composante est vide si le bloc se termine par \n — on la préserve telle quelle
         let trailingEmpty = lines.last == "" ? true : false
         if trailingEmpty { lines.removeLast() }
 
         let transformed = lines.map { line -> String in
-            // Ignore les lignes vides
             guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return line }
             let stripped = line.replacingOccurrences(
                 of: "^(#{1,6}\\s+|[-*+]\\s+|\\d+\\.\\s+|>\\s+|- \\[[ x]\\] )",
@@ -167,8 +170,6 @@ struct FoldApp: App {
         if trailingEmpty { result += "\n" }
 
         tv.insertText(result, replacementRange: fullRange)
-
-        // Restaure une sélection couvrant tout le bloc transformé
         tv.setSelectedRange(NSRange(location: fullRange.location, length: (result as NSString).length))
     }
 
@@ -203,17 +204,14 @@ struct FoldApp: App {
         guard sel.length > 0 else { return }
         var text = (tv.string as NSString).substring(with: sel)
 
-        // ── Bloc de code ``` ... ``` (traité EN PREMIER) ──────────────────────
         if let codeBlockRx = try? NSRegularExpression(
             pattern: "^```[^\\n]*\\n([\\s\\S]*?)^```\\s*$",
             options: [.anchorsMatchLines]
         ) {
             let range = NSRange(text.startIndex..., in: text)
-            text = codeBlockRx.stringByReplacingMatches(in: text, range: range,
-                                                        withTemplate: "$1")
+            text = codeBlockRx.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
         }
 
-        // ── Inline (traité après les blocs) ───────────────────────────────────
         let inlinePatterns: [(String, String)] = [
             ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"),
             ("___(.+?)___",             "$1"),
@@ -245,3 +243,4 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+

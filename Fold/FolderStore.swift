@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import Observation
 
 private let readableExtensions = ["md", "txt", "text", "markdown", "mdown", "mkd", "rst", "fountain", "tex", "org"]
@@ -27,9 +28,11 @@ final class FolderStore {
 
     var folders: [OpenFolder] = []
 
-    // Accès security-scoped gardés ouverts — clé = url, valeur = résultat de startAccessing
     private var openAccesses: [URL: Bool] = [:]
     private var timer: Timer?
+
+    // Injecté depuis FoldApp
+    var recentStore: RecentStore? = nil
 
     init() {
         restorePersistedFolders()
@@ -40,10 +43,15 @@ final class FolderStore {
 
     func addFolder(url: URL) {
         openAccess(url: url)
+        let docs = loadDocuments(from: url)
+
+        // Injecte tous les fichiers du dossier dans notre liste de récents
+        recentStore?.addAll(docs.map { $0.fileURL })
+
         if let idx = folders.firstIndex(where: { $0.url == url }) {
-            folders[idx].documents = loadDocuments(from: url)
+            folders[idx].documents = docs
         } else {
-            folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
+            folders.append(OpenFolder(id: UUID(), url: url, documents: docs))
         }
         persistFolders()
     }
@@ -60,18 +68,16 @@ final class FolderStore {
         }
     }
 
-    // MARK: - Timer live toutes les secondes
+    // MARK: - Timer live
 
     private func startLiveTimer() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async {
-                self?.refreshAll()
-            }
+            DispatchQueue.main.async { self?.refreshAll() }
         }
         RunLoop.main.add(timer!, forMode: .common)
     }
 
-    // MARK: - Gestion de l'accès security-scoped
+    // MARK: - Security-scoped access
 
     private func openAccess(url: URL) {
         guard openAccesses[url] == nil else { return }
@@ -79,13 +85,11 @@ final class FolderStore {
     }
 
     private func closeAccess(url: URL) {
-        if openAccesses[url] == true {
-            url.stopAccessingSecurityScopedResource()
-        }
+        if openAccesses[url] == true { url.stopAccessingSecurityScopedResource() }
         openAccesses.removeValue(forKey: url)
     }
 
-    // MARK: - Persistance via Security-Scoped Bookmarks
+    // MARK: - Persistance
 
     private func persistFolders() {
         let bookmarks: [Data] = folders.compactMap { folder in
@@ -114,7 +118,7 @@ final class FolderStore {
         }
     }
 
-    // MARK: - Chargement des documents
+    // MARK: - Chargement
 
     private func loadDocuments(from url: URL) -> [FolderItem] {
         let urls = (try? FileManager.default.contentsOfDirectory(

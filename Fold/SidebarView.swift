@@ -3,24 +3,47 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(FolderStore.self) var folderStore
     @Environment(TagStore.self) var tagStore
+
+    @Binding var selectedFileURL: URL?
     var currentDocumentTags: [String] = []
     @Binding var activeTag: String?
 
+    @State private var expandedFolders: Set<UUID> = []
+
     var body: some View {
         List {
-            // ── Section Dossiers ───────────────────────
+
+            // ── Dossiers ───────────────────────────────
             Section {
                 ForEach(folderStore.folders) { folder in
-                    FolderRowView(folder: folder, folderStore: folderStore)
+                    FolderSectionRow(
+                        folder: folder,
+                        isExpanded: expandedFolders.contains(folder.id),
+                        selectedFileURL: $selectedFileURL,
+                        onToggle: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                if expandedFolders.contains(folder.id) {
+                                    expandedFolders.remove(folder.id)
+                                } else {
+                                    expandedFolders.insert(folder.id)
+                                }
+                            }
+                        },
+                        onRemove: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                folderStore.removeFolder(folder)
+                            }
+                        }
+                    )
                 }
             } header: {
                 Text("Dossiers")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .textCase(nil)
             }
 
-            // ── Section Étiquettes ─────────────────────
+            // ── Étiquettes ─────────────────────────────
             if !currentDocumentTags.isEmpty {
                 Section {
                     ForEach(currentDocumentTags, id: \.self) { tag in
@@ -36,7 +59,7 @@ struct SidebarView: View {
                     }
                 } header: {
                     Text("Étiquettes")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .textCase(nil)
                 }
@@ -59,72 +82,81 @@ struct SidebarView: View {
         panel.canChooseFiles          = false
         panel.canChooseDirectories    = true
         panel.allowsMultipleSelection = true
-        panel.title = "Ouvrir des dossiers"
+        panel.title = "Ouvrir un dossier"
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { folderStore.addFolder(url: url) }
     }
 }
 
-// MARK: - Folder Row avec List native
+// MARK: - Folder header + children
 
-struct FolderRowView: View {
+struct FolderSectionRow: View {
     let folder: OpenFolder
-    let folderStore: FolderStore
+    let isExpanded: Bool
+    @Binding var selectedFileURL: URL?
+    let onToggle: () -> Void
+    let onRemove: () -> Void
 
-    @State private var isExpanded = true
-    @State private var isHovered  = false
+    @State private var isHovered = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            ForEach(folder.documents) { doc in
-                DocRowView(doc: doc)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "folder")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 13))
-                Text(folder.name)
-                    .font(.system(size: 13, weight: .medium))
-                Spacer()
-                if isHovered {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            folderStore.removeFolder(folder)
-                        }
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .foregroundStyle(.tertiary)
-                            .font(.system(size: 13))
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
-                    .help("Retirer ce dossier")
+        HStack(spacing: 6) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .frame(width: 12)
+            Image(systemName: "folder.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(.orange)
+            Text(folder.name)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+            Spacer()
+            if isHovered {
+                Button(action: onRemove) {
+                    Image(systemName: "minus.circle.fill")
+                        .foregroundStyle(.tertiary)
+                        .font(.system(size: 13))
                 }
+                .buttonStyle(.plain)
+                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                .help("Retirer ce dossier")
             }
-            .contentShape(Rectangle())
-            .onHover { hovered in
-                withAnimation(.easeInOut(duration: 0.15)) { isHovered = hovered }
-            }
-            .onTapGesture(count: 2) {
-                withAnimation(.easeInOut(duration: 0.2)) { isExpanded.toggle() }
+        }
+        .contentShape(Rectangle())
+        .onHover { h in
+            withAnimation(.easeInOut(duration: 0.15)) { isHovered = h }
+        }
+        .onTapGesture { onToggle() }
+        .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+
+        if isExpanded {
+            ForEach(folder.documents) { doc in
+                SidebarDocRow(url: doc.fileURL, selectedURL: $selectedFileURL)
+                    .padding(.leading, 16)
             }
         }
     }
 }
 
-// MARK: - Doc Row
+// MARK: - Doc row
+// Clic simple  → prévisualisation inline (selectedURL)
+// Double-clic  → ouvre dans une nouvelle fenêtre via NSDocumentController
 
-struct DocRowView: View {
-    let doc: FolderItem
+struct SidebarDocRow: View {
+    let url: URL
+    @Binding var selectedURL: URL?
     @State private var isHovered = false
+
+    private var title: String { url.deletingPathExtension().lastPathComponent }
+    private var isSelected: Bool { selectedURL == url }
 
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: "doc.text")
                 .font(.system(size: 12))
                 .foregroundStyle(.tertiary)
-            Text(doc.title)
+            Text(title)
                 .font(.system(size: 13))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
@@ -134,25 +166,37 @@ struct DocRowView: View {
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 5)
-                .fill(isHovered ? Color.secondary.opacity(0.12) : Color.clear)
+                .fill(isSelected
+                      ? Color.accentColor.opacity(0.18)
+                      : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture { openDoc(doc.fileURL) }
+        .onTapGesture(count: 2) {
+            openInNewWindow(url)
+        }
+        .onTapGesture(count: 1) {
+            selectedURL = url
+        }
+        .help("Clic : aperçu — Double-clic : nouvelle fenêtre")
         .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
     }
 
-    private func openDoc(_ url: URL) {
+    private func openInNewWindow(_ url: URL) {
+        // Efface l'aperçu inline — la fenêtre courante retrouve son document
+        selectedURL = nil
+
         _ = url.startAccessingSecurityScopedResource()
 
         if let existing = NSDocumentController.shared.document(for: url) {
+            existing.makeWindowControllers()
             existing.showWindows()
             return
         }
         NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { doc, _, error in
             if let error {
-                NSWorkspace.shared.open(url)
                 print("Fold openDocument error: \(error.localizedDescription)")
+                NSWorkspace.shared.open(url)
             }
             doc?.showWindows()
         }
@@ -168,7 +212,7 @@ struct TagRowView: View {
     let onTap: () -> Void
 
     @State private var showPicker = false
-    @State private var isHovered = false
+    @State private var isHovered  = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -176,14 +220,11 @@ struct TagRowView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.tertiary)
                 .frame(width: 14)
-
             Text(tag)
                 .font(.system(size: 13))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
-
             Spacer()
-
             Circle()
                 .fill(tagStore.swiftUIColor(for: tag))
                 .frame(width: 10, height: 10)
@@ -197,8 +238,8 @@ struct TagRowView: View {
         .background(
             RoundedRectangle(cornerRadius: 5)
                 .fill(isActive
-                    ? tagStore.swiftUIColor(for: tag).opacity(0.18)
-                    : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
+                      ? tagStore.swiftUIColor(for: tag).opacity(0.18)
+                      : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
@@ -226,13 +267,10 @@ struct TagColorPicker: View {
             Text("Couleur de \"\(tag)\"")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
-
             LazyVGrid(columns: Array(repeating: GridItem(.fixed(26), spacing: 6), count: 6), spacing: 6) {
                 ForEach(palette, id: \.self) { hex in
                     ZStack {
-                        Circle()
-                            .fill(Color(hex: hex))
-                            .frame(width: 30, height: 30)
+                        Circle().fill(Color(hex: hex)).frame(width: 30, height: 30)
                         if tagStore.tagColors[tag] == hex {
                             Circle()
                                 .strokeBorder(Color.primary.opacity(0.5), lineWidth: 2)
