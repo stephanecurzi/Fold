@@ -138,7 +138,7 @@ struct FoldApp: App {
                 Divider()
                 Button("Citation") { formatLine("> ") }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
-                Button("Bloc de code") { wrapSelection("```\n", "\n```") }
+                Button("Bloc de code") { formatLine("\t") }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
                 Divider()
                 Button("Lien") { wrapSelection("[", "](url)") }
@@ -250,4 +250,5 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+
 

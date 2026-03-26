@@ -6,6 +6,7 @@ private let kFoldMark = NSNumber(value: 1)
 
 extension NSAttributedString.Key {
     static let foldBlockquote = NSAttributedString.Key("fold.blockquote")
+    static let foldCodeblock  = NSAttributedString.Key("fold.codeblock")
 }
 
 final class MarkdownTextStorage: NSTextStorage {
@@ -75,6 +76,7 @@ final class MarkdownTextStorage: NSTextStorage {
         applyInline(text: text, in: full)
         applyTagLineColors(text: text)
         applyTagCollapse(text: text)
+        applyFencedCodeBlocks(text: text)   // En dernier — écrase tout formatage inline à l'intérieur
     }
 
     // MARK: - Block Elements
@@ -202,13 +204,6 @@ final class MarkdownTextStorage: NSTextStorage {
             return
         }
 
-        // ── Bloc de code ───────────────────────────────
-        if rx(#"^```"#).firstMatch(in: line, range: lineRange) != nil {
-            backing.addAttributes([
-                .font: monoFont,
-                .foregroundColor: NSColor.secondaryLabelColor
-            ], range: absLineRange)
-        }
     }
 
     /// Mesure la largeur réelle d'une chaîne avec le body font courant.
@@ -256,27 +251,23 @@ final class MarkdownTextStorage: NSTextStorage {
         inlineHexColors(text, full)
     }
 
-    // MARK: - Hex colors
+    // MARK: - Hex Colors
 
     private func inlineHexColors(_ text: String, _ full: NSRange) {
-        // Matches #RRGGBB and #RGB not preceded by another # (to avoid heading markers)
-        rx(#"(?<![#\w])(#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3}))(?![\w])"#)
+        rx(#"(?<![#\w])(#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3}))(?![0-9A-Fa-f\w])"#)
             .enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
                 guard let self, let m else { return }
                 let r = m.range(at: 1)
-                guard valid(r) else { return }
-                guard let hexStr = Range(r, in: text).map({ String(text[$0]) }),
-                      let color = NSColor(hex: hexStr.count == 4
-                          ? expandShortHex(hexStr)
-                          : hexStr)
-                else { return }
+                guard valid(r), let swiftRange = Range(r, in: text) else { return }
+                let hexStr = String(text[swiftRange])
+                let expanded = hexStr.count == 4 ? expandShortHex(hexStr) : hexStr
+                guard let color = NSColor(hex: expanded) else { return }
                 backing.addAttribute(.foregroundColor, value: color, range: r)
             }
     }
 
-    /// Expands #RGB → #RRGGBB
     private func expandShortHex(_ hex: String) -> String {
-        let h = hex.dropFirst() // remove #
+        let h = hex.dropFirst()
         return "#" + h.map { "\($0)\($0)" }.joined()
     }
 
@@ -343,6 +334,44 @@ final class MarkdownTextStorage: NSTextStorage {
                     backing.addAttribute(.backgroundColor,
                                          value: highlightColor.withAlphaComponent(0.12),
                                          range: lineRange)
+                }
+            }
+            offset += lineLen + 1
+        }
+    }
+
+    // MARK: - Tab-indented Code Blocks (Markdown original)
+
+    private func applyFencedCodeBlocks(text: String) {
+        let lines = text.components(separatedBy: "\n")
+        var offset = 0
+
+        let codePs: NSParagraphStyle = {
+            let ps = NSMutableParagraphStyle()
+            ps.lineSpacing      = 3
+            ps.paragraphSpacing = 2
+            return ps
+        }()
+
+        // Une ligne commençant par tab = code, sauf si c'est un item de liste
+        for line in lines {
+            let lineLen  = (line as NSString).length
+            let absRange = NSRange(location: offset, length: lineLen)
+            let lr       = NSRange(location: 0, length: lineLen)
+
+            if line.hasPrefix("\t") && valid(absRange) {
+                let isListItem =
+                    rx(#"^\t([-*+])\s"#).firstMatch(in: line, range: lr)   != nil ||
+                    rx(#"^\t\d+\.\s"#).firstMatch(in: line, range: lr)     != nil ||
+                    rx(#"^\t- \[[ x]\] "#).firstMatch(in: line, range: lr) != nil
+
+                if !isListItem {
+                    backing.setAttributes([
+                        .font: monoFont,
+                        .foregroundColor: NSColor.secondaryLabelColor,
+                        .paragraphStyle: codePs,
+                        .foldCodeblock: kFoldMark
+                    ], range: absRange)
                 }
             }
             offset += lineLen + 1

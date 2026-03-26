@@ -447,6 +447,8 @@ final class FoldLayoutManager: NSLayoutManager {
         let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         drawBars(for: .foldBlockquote, color: .systemOrange, in: charRange,
                  storage: storage, container: container, origin: origin)
+        drawBars(for: .foldCodeblock, color: .separatorColor, in: charRange,
+                 storage: storage, container: container, origin: origin)
     }
 
     private func drawBars(for key: NSAttributedString.Key,
@@ -501,4 +503,5 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
+
 
