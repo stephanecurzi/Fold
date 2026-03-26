@@ -66,6 +66,10 @@ struct InlineFileView: View {
         saveTask = Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
+            // Si le fichier est déjà ouvert comme NSDocument, on ne touche pas
+            // au disque directement — AppKit gère sa propre sauvegarde et toute
+            // écriture concurrente déclencherait l'alerte "changed by another app".
+            guard NSDocumentController.shared.document(for: target) == nil else { return }
             try? text.write(to: target, atomically: true, encoding: .utf8)
         }
     }
@@ -75,7 +79,10 @@ struct InlineFileView: View {
     private func flushSave(for target: URL) {
         saveTask?.cancel()
         saveTask = nil
+        // Même garde : pas d'écriture directe si AppKit possède déjà ce fichier.
+        guard NSDocumentController.shared.document(for: target) == nil else { return }
         try? content.write(to: target, atomically: true, encoding: .utf8)
     }
 }
+
 

@@ -1,15 +1,16 @@
 import SwiftUI
 import AppKit
+import Combine
 
 struct SidebarView: View {
     @Environment(FolderStore.self) var folderStore
     @Environment(TagStore.self) var tagStore
 
-    @Binding var selectedFileURL: URL?
     var currentDocumentTags: [String] = []
     @Binding var activeTag: String?
 
-    @State private var expandedFolders: Set<UUID> = []
+    @State private var expandedFolders:  Set<UUID> = []
+    @State private var openDocumentURLs: Set<URL>  = []
 
     var body: some View {
         List {
@@ -20,7 +21,7 @@ struct SidebarView: View {
                     FolderSectionRow(
                         folder: folder,
                         isExpanded: expandedFolders.contains(folder.id),
-                        selectedFileURL: $selectedFileURL,
+                        openDocumentURLs: openDocumentURLs,
                         onToggle: {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 if expandedFolders.contains(folder.id) {
@@ -39,9 +40,10 @@ struct SidebarView: View {
                 }
             } header: {
                 Text("Dossiers")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .textCase(nil)
+                    .padding(.bottom, 2)
             }
 
             // ── Étiquettes ─────────────────────────────
@@ -60,9 +62,10 @@ struct SidebarView: View {
                     }
                 } header: {
                     Text("Étiquettes")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                         .textCase(nil)
+                        .padding(.bottom, 2)
                 }
             }
         }
@@ -76,6 +79,15 @@ struct SidebarView: View {
                 .help("Ouvrir un dossier")
             }
         }
+        .onAppear { refreshOpenURLs() }
+        .onReceive(windowPublisher) { _ in refreshOpenURLs() }
+    }
+
+    private var windowPublisher: AnyPublisher<Notification, Never> {
+        let nc = NotificationCenter.default
+        let a = nc.publisher(for: NSWindow.didBecomeKeyNotification)
+        let b = nc.publisher(for: NSWindow.willCloseNotification)
+        return a.merge(with: b).eraseToAnyPublisher()
     }
 
     private func openFolders() {
@@ -87,6 +99,12 @@ struct SidebarView: View {
         guard panel.runModal() == .OK else { return }
         for url in panel.urls { folderStore.addFolder(url: url) }
     }
+
+    private func refreshOpenURLs() {
+        openDocumentURLs = Set(
+            NSDocumentController.shared.documents.compactMap { $0.fileURL }
+        )
+    }
 }
 
 // MARK: - Folder header + children
@@ -94,47 +112,54 @@ struct SidebarView: View {
 struct FolderSectionRow: View {
     let folder: OpenFolder
     let isExpanded: Bool
-    @Binding var selectedFileURL: URL?
+    let openDocumentURLs: Set<URL>
     let onToggle: () -> Void
     let onRemove: () -> Void
 
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .frame(width: 12)
-            Image(systemName: "folder.fill")
-                .font(.system(size: 12))
-                .foregroundStyle(.orange)
+                .foregroundStyle(.primary)
+                .frame(width: 10)
+
+            Image(systemName: "folder")
+                .font(.system(size: 14))
+                .foregroundStyle(.primary)
+                .frame(width: 18, alignment: .center)
+
             Text(folder.name)
                 .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
+
             Spacer()
+
             if isHovered {
                 Button(action: onRemove) {
-                    Image(systemName: "minus.circle.fill")
-                        .foregroundStyle(.tertiary)
-                        .font(.system(size: 13))
+                    Image(systemName: "minus.circle")
+                        .font(.system(size: 14))
+                        .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
-                .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                .transition(.opacity.combined(with: .scale(scale: 0.85)))
                 .help("Retirer ce dossier")
             }
         }
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         .onHover { h in
             withAnimation(.easeInOut(duration: 0.15)) { isHovered = h }
         }
         .onTapGesture { onToggle() }
-        .listRowInsets(EdgeInsets(top: 3, leading: 8, bottom: 3, trailing: 8))
+        .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
 
         if isExpanded {
             ForEach(folder.documents) { doc in
-                SidebarDocRow(url: doc.fileURL, selectedURL: $selectedFileURL)
-                    .padding(.leading, 16)
+                SidebarDocRow(url: doc.fileURL, openDocumentURLs: openDocumentURLs)
+                    .padding(.leading, 18)
             }
         }
     }
@@ -144,58 +169,57 @@ struct FolderSectionRow: View {
 
 struct SidebarDocRow: View {
     let url: URL
-    @Binding var selectedURL: URL?
+    let openDocumentURLs: Set<URL>
 
     @State private var isHovered = false
 
-    private var title: String    { url.deletingPathExtension().lastPathComponent }
-    private var isSelected: Bool { selectedURL == url }
+    private var title: String { url.deletingPathExtension().lastPathComponent }
+
+    private var isOpenInFocus: Bool { openDocumentURLs.contains(url) }
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "doc.text")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
+                .font(.system(size: 13))
+                .foregroundStyle(.primary)
+                .frame(width: 16, alignment: .center)
+
             Text(title)
                 .font(.system(size: 13))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+
             Spacer()
-            if isSelected {
+
+            if isOpenInFocus {
                 Circle()
                     .fill(Color.accentColor.opacity(0.8))
                     .frame(width: 6, height: 6)
             }
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 5)
         .background(
-            RoundedRectangle(cornerRadius: 5)
-                .fill(isHovered ? Color.secondary.opacity(0.12) : Color.clear)
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isHovered ? Color.secondary.opacity(0.10) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture { selectedURL = url }
+        .onTapGesture { openDocument() }
         .contextMenu {
-            Button {
-                openInNewWindow()
-            } label: {
-                Label("Ouvrir dans une nouvelle fenêtre", systemImage: "macwindow.badge.plus")
-            }
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } label: {
                 Label("Révéler dans le Finder", systemImage: "folder")
             }
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
     }
 
-    private func openInNewWindow() {
-        selectedURL = nil
+    private func openDocument() {
         _ = url.startAccessingSecurityScopedResource()
+        // Réutilise la fenêtre existante si le document est déjà ouvert
         if let existing = NSDocumentController.shared.document(for: url) {
-            existing.makeWindowControllers()
             existing.showWindows()
             return
         }
@@ -221,36 +245,39 @@ struct TagRowView: View {
     @State private var isHovered  = false
 
     var body: some View {
-        HStack(spacing: 6) {
-            Text("@")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.tertiary)
-                .frame(width: 14)
+        HStack(spacing: 7) {
+            Image(systemName: "at")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: 16, alignment: .center)
+
             Text(tag)
                 .font(.system(size: 13))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+
             Spacer()
+
             Circle()
                 .fill(tagStore.swiftUIColor(for: tag))
-                .frame(width: 10, height: 10)
+                .frame(width: 9, height: 9)
                 .onTapGesture { showPicker = true }
                 .popover(isPresented: $showPicker, arrowEdge: .trailing) {
                     TagColorPicker(tag: tag, tagStore: tagStore)
                 }
         }
-        .padding(.vertical, 3)
-        .padding(.horizontal, 4)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 5)
         .background(
-            RoundedRectangle(cornerRadius: 5)
+            RoundedRectangle(cornerRadius: 6)
                 .fill(isActive
-                      ? tagStore.swiftUIColor(for: tag).opacity(0.18)
-                      : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
+                      ? tagStore.swiftUIColor(for: tag).opacity(0.14)
+                      : (isHovered ? Color.secondary.opacity(0.10) : Color.clear))
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
-        .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
+        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
     }
 }
 

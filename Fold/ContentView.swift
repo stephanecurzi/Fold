@@ -10,34 +10,21 @@ struct ContentView: View {
     @Environment(PreferencesStore.self) var prefs
     @Environment(RecentStore.self) var recentStore
 
-    @State private var selectedFileURL: URL?    = nil
-    @State private var browsingContent: String  = ""
-    @State private var activeTag:       String? = nil
+    @State private var activeTag:        String? = nil
     @State private var columnVisibility: NavigationSplitViewVisibility = {
         UserDefaults.standard.bool(forKey: sidebarVisibilityKey) ? .all : .detailOnly
     }()
     @State private var searchStore = SearchStore()
 
-    private var displayedTags: [String] {
-        selectedFileURL != nil
-            ? TagStore.extract(from: browsingContent)
-            : TagStore.extract(from: document.text)
-    }
-
     var body: some View {
         NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(
-                selectedFileURL: $selectedFileURL,
-                currentDocumentTags: displayedTags,
+                currentDocumentTags: TagStore.extract(from: document.text),
                 activeTag: $activeTag
             )
-            .navigationSplitViewColumnWidth(min: 200, ideal: 240)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 200)
         } detail: {
-            if let url = selectedFileURL {
-                InlineFileView(url: url, content: $browsingContent, activeTag: $activeTag)
-            } else {
-                TextEditorView(document: document, activeTag: $activeTag)
-            }
+            TextEditorView(document: document, activeTag: $activeTag)
         }
         .environment(folderStore)
         .environment(tagStore)
@@ -45,7 +32,6 @@ struct ContentView: View {
         .environment(recentStore)
         .environment(searchStore)
         .tint(.orange)
-        .navigationTitle(selectedFileURL?.deletingPathExtension().lastPathComponent ?? "Fold")
         .onAppear {
             activeTag = nil
         }
@@ -53,25 +39,13 @@ struct ContentView: View {
             let isVisible = (new == .all || new == .doubleColumn)
             UserDefaults.standard.set(isVisible, forKey: sidebarVisibilityKey)
         }
-        .onChange(of: selectedFileURL) { _, url in
-            guard url != nil else { return }
-            NSApp.keyWindow?.title = url?.deletingPathExtension().lastPathComponent ?? "Fold"
-            discardIfUntitledAndEmpty()
+        .onChange(of: document.text) { _, _ in
+            // Retire le tag actif s'il disparaît du document courant
+            if let active = activeTag,
+               !TagStore.extract(from: document.text).contains(active) {
+                activeTag = nil
+            }
         }
-        .onChange(of: displayedTags) { _, tags in
-            if let active = activeTag, !tags.contains(active) { activeTag = nil }
-        }
-    }
-
-    // MARK: - Discard untitled empty document
-
-    private func discardIfUntitledAndEmpty() {
-        // Cherche un NSDocument sans URL (jamais sauvegardé) et non modifié (vide)
-        guard let nsDoc = NSDocumentController.shared.documents.first(where: {
-            $0.fileURL == nil && !$0.isDocumentEdited
-        }) else { return }
-
-        nsDoc.close()
     }
 }
 
