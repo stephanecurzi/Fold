@@ -13,12 +13,38 @@ extension Notification.Name {
     static let foldPrefsChanged = Notification.Name("fold.prefsChanged")
 }
 
+// MARK: - AppDelegate
+
+class AppDelegate: NSObject, NSApplicationDelegate {
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Si aucune fenêtre n'est déjà ouverte (ex. ouverture depuis Finder),
+        // on crée un document vide directement — sans sélecteur de fichier.
+        if NSApp.windows.filter({ $0.isVisible }).isEmpty {
+            NSDocumentController.shared.newDocument(nil)
+        }
+    }
+
+    func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    func applicationOpenUntitledFile(_ sender: NSApplication) -> Bool {
+        NSDocumentController.shared.newDocument(nil)
+        return true
+    }
+}
+
+// MARK: - App
+
 @main
 struct FoldApp: App {
-    @State private var folderStore  = FolderStore()
-    @State private var tagStore     = TagStore()
-    @State private var prefs        = PreferencesStore()
-    @State private var recentStore  = RecentStore()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    @State private var folderStore = FolderStore()
+    @State private var tagStore    = TagStore()
+    @State private var prefs       = PreferencesStore()
+    @State private var recentStore = RecentStore()
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
@@ -33,9 +59,7 @@ struct FoldApp: App {
                 .environment(recentStore)
                 .tint(.orange)
                 .onAppear {
-                    // Câble recentStore dans folderStore au premier rendu
                     folderStore.recentStore = recentStore
-                    // Enregistre le document courant dans les récents
                     if let url = config.fileURL {
                         recentStore.add(url)
                     }
@@ -142,7 +166,6 @@ struct FoldApp: App {
         guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
         let sel = tv.selectedRange()
         let str = tv.string as NSString
-
         let selectionRange = sel.length > 0 ? sel : str.lineRange(for: sel)
         let firstLineRange = str.lineRange(for: NSRange(location: selectionRange.location, length: 0))
         let lastLineRange  = str.lineRange(for: NSRange(location: max(selectionRange.location,
@@ -150,25 +173,19 @@ struct FoldApp: App {
                                                         length: 0))
         let fullRange = NSRange(location: firstLineRange.location,
                                 length: lastLineRange.location + lastLineRange.length - firstLineRange.location)
-
         let block = str.substring(with: fullRange)
         var lines = block.components(separatedBy: "\n")
-
-        let trailingEmpty = lines.last == "" ? true : false
+        let trailingEmpty = lines.last == ""
         if trailingEmpty { lines.removeLast() }
-
         let transformed = lines.map { line -> String in
             guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return line }
             let stripped = line.replacingOccurrences(
                 of: "^(#{1,6}\\s+|[-*+]\\s+|\\d+\\.\\s+|>\\s+|- \\[[ x]\\] )",
-                with: "", options: .regularExpression
-            )
+                with: "", options: .regularExpression)
             return prefix + stripped
         }
-
         var result = transformed.joined(separator: "\n")
         if trailingEmpty { result += "\n" }
-
         tv.insertText(result, replacementRange: fullRange)
         tv.setSelectedRange(NSRange(location: fullRange.location, length: (result as NSString).length))
     }
@@ -203,41 +220,31 @@ struct FoldApp: App {
         let sel = tv.selectedRange()
         guard sel.length > 0 else { return }
         var text = (tv.string as NSString).substring(with: sel)
-
-        if let codeBlockRx = try? NSRegularExpression(
-            pattern: "^```[^\\n]*\\n([\\s\\S]*?)^```\\s*$",
-            options: [.anchorsMatchLines]
-        ) {
-            let range = NSRange(text.startIndex..., in: text)
-            text = codeBlockRx.stringByReplacingMatches(in: text, range: range, withTemplate: "$1")
+        if let rx = try? NSRegularExpression(pattern: "^```[^\\n]*\\n([\\s\\S]*?)^```\\s*$",
+                                              options: [.anchorsMatchLines]) {
+            text = rx.stringByReplacingMatches(in: text,
+                                               range: NSRange(text.startIndex..., in: text),
+                                               withTemplate: "$1")
         }
-
         let inlinePatterns: [(String, String)] = [
-            ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"),
-            ("___(.+?)___",             "$1"),
-            ("\\*\\*(.+?)\\*\\*",       "$1"),
-            ("__(.+?)__",               "$1"),
+            ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"), ("___(.+?)___", "$1"),
+            ("\\*\\*(.+?)\\*\\*", "$1"),        ("__(.+?)__", "$1"),
             ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", "$1"),
-            ("\\*([^*\\n]+)\\*",        "$1"),
-            ("_([^_\\n]+)_",            "$1"),
-            ("~~(.+?)~~",               "$1"),
-            ("==(.+?)==",               "$1"),
+            ("\\*([^*\\n]+)\\*", "$1"),          ("_([^_\\n]+)_", "$1"),
+            ("~~(.+?)~~", "$1"),                 ("==(.+?)==", "$1"),
         ]
-        let linePrefixPatterns = [
-            "^#{1,6}\\s+", "^[-*+]\\s+", "^\\d+\\.\\s+",
-            "^>\\s*", "^- \\[[ x]\\] "
-        ]
-
         for (pattern, template) in inlinePatterns {
             if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
-                let range = NSRange(text.startIndex..., in: text)
-                text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: template)
+                text = rx.stringByReplacingMatches(in: text,
+                                                   range: NSRange(text.startIndex..., in: text),
+                                                   withTemplate: template)
             }
         }
-        for pattern in linePrefixPatterns {
+        for pattern in ["^#{1,6}\\s+", "^[-*+]\\s+", "^\\d+\\.\\s+", "^>\\s*", "^- \\[[ x]\\] "] {
             if let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) {
-                let range = NSRange(text.startIndex..., in: text)
-                text = rx.stringByReplacingMatches(in: text, range: range, withTemplate: "")
+                text = rx.stringByReplacingMatches(in: text,
+                                                   range: NSRange(text.startIndex..., in: text),
+                                                   withTemplate: "")
             }
         }
         tv.insertText(text, replacementRange: sel)

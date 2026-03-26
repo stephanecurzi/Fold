@@ -1,6 +1,8 @@
 import SwiftUI
 import AppKit
 
+private let sidebarVisibilityKey = "fold.sidebarVisible"
+
 struct ContentView: View {
     @ObservedObject var document: FoldDocument
     @Environment(FolderStore.self) var folderStore
@@ -11,7 +13,9 @@ struct ContentView: View {
     @State private var selectedFileURL: URL?    = nil
     @State private var browsingContent: String  = ""
     @State private var activeTag:       String? = nil
-    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
+    @State private var columnVisibility: NavigationSplitViewVisibility = {
+        UserDefaults.standard.bool(forKey: sidebarVisibilityKey) ? .all : .detailOnly
+    }()
     @State private var searchStore = SearchStore()
 
     private var displayedTags: [String] {
@@ -43,15 +47,31 @@ struct ContentView: View {
         .tint(.orange)
         .navigationTitle(selectedFileURL?.deletingPathExtension().lastPathComponent ?? "Fold")
         .onAppear {
-            columnVisibility = .detailOnly
             activeTag = nil
         }
+        .onChange(of: columnVisibility) { _, new in
+            let isVisible = (new == .all || new == .doubleColumn)
+            UserDefaults.standard.set(isVisible, forKey: sidebarVisibilityKey)
+        }
         .onChange(of: selectedFileURL) { _, url in
+            guard url != nil else { return }
             NSApp.keyWindow?.title = url?.deletingPathExtension().lastPathComponent ?? "Fold"
+            discardIfUntitledAndEmpty()
         }
         .onChange(of: displayedTags) { _, tags in
             if let active = activeTag, !tags.contains(active) { activeTag = nil }
         }
+    }
+
+    // MARK: - Discard untitled empty document
+
+    private func discardIfUntitledAndEmpty() {
+        // Cherche un NSDocument sans URL (jamais sauvegardé) et non modifié (vide)
+        guard let nsDoc = NSDocumentController.shared.documents.first(where: {
+            $0.fileURL == nil && !$0.isDocumentEdited
+        }) else { return }
+
+        nsDoc.close()
     }
 }
 

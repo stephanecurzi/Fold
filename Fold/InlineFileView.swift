@@ -8,7 +8,7 @@ struct InlineFileView: View {
     @Environment(PreferencesStore.self) var prefs
     @Environment(TagStore.self) var tagStore
 
-    @State private var isLoaded = false
+    @State private var isLoaded  = false
     @State private var saveTask: Task<Void, Never>? = nil
 
     var body: some View {
@@ -37,34 +37,45 @@ struct InlineFileView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: activeTag)
-        .onAppear       { load() }
-        .onChange(of: url) { _, _ in load() }
+        .onAppear { load(url) }
+        .onChange(of: url) { old, new in
+            // Sauvegarde le fichier précédent immédiatement avant de charger le nouveau
+            flushSave(for: old)
+            load(new)
+        }
         .onChange(of: content) { _, new in
             guard isLoaded else { return }
-            scheduleSave(new)
+            scheduleSave(new, to: url)
         }
     }
 
     // MARK: - Chargement
 
-    private func load() {
+    private func load(_ target: URL) {
         isLoaded = false
         activeTag = nil
-        _ = url.startAccessingSecurityScopedResource()
-        content = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        // Active isLoaded au prochain cycle pour ne pas déclencher une sauvegarde immédiate
+        _ = target.startAccessingSecurityScopedResource()
+        content = (try? String(contentsOf: target, encoding: .utf8)) ?? ""
         DispatchQueue.main.async { isLoaded = true }
     }
 
     // MARK: - Sauvegarde différée (500 ms après la dernière frappe)
 
-    private func scheduleSave(_ text: String) {
+    private func scheduleSave(_ text: String, to target: URL) {
         saveTask?.cancel()
         saveTask = Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
-            try? text.write(to: url, atomically: true, encoding: .utf8)
+            try? text.write(to: target, atomically: true, encoding: .utf8)
         }
+    }
+
+    // MARK: - Sauvegarde immédiate (avant changement de fichier)
+
+    private func flushSave(for target: URL) {
+        saveTask?.cancel()
+        saveTask = nil
+        try? content.write(to: target, atomically: true, encoding: .utf8)
     }
 }
 
