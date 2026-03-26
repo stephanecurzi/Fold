@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SidebarView: View {
     @Environment(FolderStore.self) var folderStore
@@ -140,15 +141,14 @@ struct FolderSectionRow: View {
 }
 
 // MARK: - Doc row
-// Clic simple  → prévisualisation inline (selectedURL)
-// Double-clic  → ouvre dans une nouvelle fenêtre via NSDocumentController
 
 struct SidebarDocRow: View {
     let url: URL
     @Binding var selectedURL: URL?
+
     @State private var isHovered = false
 
-    private var title: String { url.deletingPathExtension().lastPathComponent }
+    private var title: String    { url.deletingPathExtension().lastPathComponent }
     private var isSelected: Bool { selectedURL == url }
 
     var body: some View {
@@ -161,33 +161,39 @@ struct SidebarDocRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
             Spacer()
+            if isSelected {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.8))
+                    .frame(width: 6, height: 6)
+            }
         }
         .padding(.vertical, 3)
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 5)
-                .fill(isSelected
-                      ? Color.accentColor.opacity(0.18)
-                      : (isHovered ? Color.secondary.opacity(0.12) : Color.clear))
+                .fill(isHovered ? Color.secondary.opacity(0.12) : Color.clear)
         )
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
-        .onTapGesture(count: 2) {
-            openInNewWindow(url)
+        .onTapGesture { selectedURL = url }
+        .contextMenu {
+            Button {
+                openInNewWindow()
+            } label: {
+                Label("Ouvrir dans une nouvelle fenêtre", systemImage: "macwindow.badge.plus")
+            }
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } label: {
+                Label("Révéler dans le Finder", systemImage: "folder")
+            }
         }
-        .onTapGesture(count: 1) {
-            selectedURL = url
-        }
-        .help("Clic : aperçu — Double-clic : nouvelle fenêtre")
         .listRowInsets(EdgeInsets(top: 1, leading: 8, bottom: 1, trailing: 8))
     }
 
-    private func openInNewWindow(_ url: URL) {
-        // Efface l'aperçu inline — la fenêtre courante retrouve son document
+    private func openInNewWindow() {
         selectedURL = nil
-
         _ = url.startAccessingSecurityScopedResource()
-
         if let existing = NSDocumentController.shared.document(for: url) {
             existing.makeWindowControllers()
             existing.showWindows()
