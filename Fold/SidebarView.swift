@@ -313,4 +313,3 @@ struct TagColorPicker: View {
         .frame(width: 240)
     }
 }
-

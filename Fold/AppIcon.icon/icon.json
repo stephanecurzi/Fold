@@ -6,6 +6,9 @@
     {
       "layers" : [
         {
+          "fill" : {
+            "solid" : "extended-gray:0.00000,1.00000"
+          },
           "image-name" : "App Icon Template5.png",
           "name" : "App Icon Template5",
           "position" : {

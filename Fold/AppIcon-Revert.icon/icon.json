@@ -23,7 +23,7 @@
           "fill-specializations" : [
             {
               "value" : {
-                "automatic-gradient" : "extended-gray:0.00000,1.00000"
+                "solid" : "extended-gray:0.00000,1.00000"
               }
             },
             {
