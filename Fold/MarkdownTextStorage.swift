@@ -346,10 +346,23 @@ final class MarkdownTextStorage: NSTextStorage {
         let lines = text.components(separatedBy: "\n")
         var offset = 0
 
+        // Mesure la position réelle du premier caractère après un tab
+        // en faisant un vrai layout — correspond exactement au tab stop d'AppKit
+        let ts = NSTextStorage(string: "\tX")
+        ts.addAttribute(.font, value: monoFont, range: NSRange(location: 0, length: 2))
+        let lm = NSLayoutManager()
+        let tc = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude,
+                                              height: CGFloat.greatestFiniteMagnitude))
+        ts.addLayoutManager(lm)
+        lm.addTextContainer(tc)
+        lm.ensureLayout(for: tc)
+        let tabWidth = lm.location(forGlyphAt: 1).x
+
         let codePs: NSParagraphStyle = {
             let ps = NSMutableParagraphStyle()
             ps.lineSpacing      = 3
             ps.paragraphSpacing = 2
+            ps.headIndent       = tabWidth   // lignes wrappées alignées après le tab
             return ps
         }()
 
@@ -548,5 +561,4 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
-
 
