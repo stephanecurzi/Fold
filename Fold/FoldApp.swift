@@ -57,7 +57,7 @@ struct FoldApp: App {
                 .environment(tagStore)
                 .environment(prefs)
                 .environment(recentStore)
-                .tint(.orange)
+
                 .onAppear {
                     folderStore.recentStore = recentStore
                     if let url = config.fileURL {
@@ -250,5 +250,6 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+
 
 

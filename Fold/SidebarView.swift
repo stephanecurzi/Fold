@@ -158,6 +158,8 @@ struct FolderSectionRow: View {
         }
         .onTapGesture { onToggle() }
         .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+        .listRowBackground(Color.clear)
+        .selectionDisabled()
 
         if isExpanded {
             ForEach(folder.documents) { doc in
@@ -174,40 +176,24 @@ struct SidebarDocRow: View {
     let url: URL
     let openDocumentURLs: Set<URL>
 
-    @State private var isHovered = false
-
     private var title: String { url.deletingPathExtension().lastPathComponent }
-
     private var isOpenInFocus: Bool { openDocumentURLs.contains(url) }
 
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "doc.text")
                 .font(.system(size: 13))
-                .foregroundStyle(.primary)
+                .foregroundStyle(isOpenInFocus ? Color.accentColor : .primary)
                 .frame(width: 16, alignment: .center)
 
             Text(title)
                 .font(.system(size: 13))
-                .foregroundStyle(.primary)
+                .foregroundStyle(isOpenInFocus ? Color.accentColor : .primary)
                 .lineLimit(1)
 
             Spacer()
-
-            if isOpenInFocus {
-                Circle()
-                    .fill(Color.accentColor.opacity(0.8))
-                    .frame(width: 6, height: 6)
-            }
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(isHovered ? Color.secondary.opacity(0.10) : Color.clear)
-        )
         .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
         .onTapGesture { openDocument() }
         .contextMenu {
             Button {
@@ -217,11 +203,12 @@ struct SidebarDocRow: View {
             }
         }
         .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+        .listRowBackground(Color.clear)
+        .selectionDisabled()
     }
 
     private func openDocument() {
         _ = url.startAccessingSecurityScopedResource()
-        // Réutilise la fenêtre existante si le document est déjà ouvert
         if let existing = NSDocumentController.shared.document(for: url) {
             existing.showWindows()
             return
@@ -281,6 +268,8 @@ struct TagRowView: View {
         .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
         .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+        .listRowBackground(Color.clear)
+        .selectionDisabled()
     }
 }
 

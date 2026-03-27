@@ -307,6 +307,26 @@ final class CenteredTextView: NSTextView {
         return false
     }
 
+    // MARK: - Typing attributes — évite le curseur minuscule en début de ligne
+    // hide() dans MarkdownTextStorage applique une police de 0.01 pt pour masquer
+    // les marqueurs Markdown. Si le curseur se retrouve sur ces caractères cachés,
+    // NSTextView hérite de cette police pour les typingAttributes → curseur minuscule.
+    // On intercepte le getter pour garantir une taille minimale cohérente.
+
+    override var typingAttributes: [NSAttributedString.Key: Any] {
+        get {
+            var attrs = super.typingAttributes
+            if let font = attrs[.font] as? NSFont, font.pointSize < 2 {
+                let fallback = (textStorage as? MarkdownTextStorage)?.preferences?.bodyFont
+                    ?? NSFont.systemFont(ofSize: 18)
+                attrs[.font]            = fallback
+                attrs[.foregroundColor] = NSColor.labelColor
+            }
+            return attrs
+        }
+        set { super.typingAttributes = newValue }
+    }
+
     // MARK: - Mise en page
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -503,5 +523,6 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
+
 
 

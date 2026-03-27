@@ -32,7 +32,7 @@ struct ContentView: View {
         .environment(prefs)
         .environment(recentStore)
         .environment(searchStore)
-        .tint(.orange)
+
         .onAppear { activeTag = nil }
         .onChange(of: columnVisibility) { _, new in
             let isVisible = (new == .all || new == .doubleColumn)
@@ -46,4 +46,5 @@ struct ContentView: View {
         }
     }
 }
+
 
