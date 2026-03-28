@@ -12,79 +12,118 @@ struct SidebarView: View {
 
     @State private var expandedFolders:  Set<UUID> = []
     @State private var openDocumentURLs: Set<URL>  = []
+    @State private var globalSearch = GlobalSearchStore()
+    @State private var searchQuery: String = ""
+
+    private var isSearching: Bool { !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
-        List {
-
-            // ── Dossiers ───────────────────────────────
-            Section {
-                ForEach(folderStore.folders) { folder in
-                    FolderSectionRow(
-                        folder: folder,
-                        isExpanded: expandedFolders.contains(folder.id),
-                        openDocumentURLs: openDocumentURLs,
-                        onToggle: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                if expandedFolders.contains(folder.id) {
-                                    expandedFolders.remove(folder.id)
-                                } else {
-                                    expandedFolders.insert(folder.id)
-                                }
-                            }
-                        },
-                        onRemove: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                folderStore.removeFolder(folder)
-                            }
-                        }
-                    )
+        contentView
+            .searchable(text: $searchQuery, placement: .sidebar, prompt: "Rechercher…")
+            .onChange(of: searchQuery) { _, q in
+                globalSearch.query = q
+                if q.isEmpty {
+                    NotificationCenter.default.post(name: .foldGlobalSearchClear, object: nil)
                 }
-            } header: {
-                Text("Dossiers")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(nil)
-                    .padding(.bottom, 2)
             }
-
-            // ── Étiquettes ─────────────────────────────
-            if !currentDocumentTags.isEmpty {
-                Section {
-                    ForEach(currentDocumentTags, id: \.self) { tag in
-                        TagRowView(
-                            tag: tag,
-                            tagStore: tagStore,
-                            isActive: activeTag == tag
-                        ) {
-                            withAnimation(.easeInOut(duration: 0.15)) {
-                                activeTag = activeTag == tag ? nil : tag
-                            }
+            .navigationTitle("Fold")
+            .toolbar {
+                if columnVisibility != .detailOnly {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button { openFolders() } label: {
+                            Image(systemName: "folder.badge.plus")
                         }
+                        .help("Ouvrir un dossier")
                     }
-                } header: {
-                    Text("Étiquettes")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .textCase(nil)
-                        .padding(.bottom, 2)
                 }
+            }
+            .onAppear {
+                refreshOpenURLs()
+                globalSearch.bind(to: folderStore)
+            }
+            .onChange(of: folderStore.folders) { _, _ in
+                globalSearch.bind(to: folderStore)
+            }
+            .onReceive(windowPublisher) { _ in refreshOpenURLs() }
+    }
+
+    @ViewBuilder
+    private var contentView: some View {
+        if isSearching {
+            GlobalSearchResultsView(
+                store: globalSearch,
+                query: searchQuery,
+                openDocumentURLs: openDocumentURLs
+            )
+        } else {
+            sidebarList
+        }
+    }
+
+    private var sidebarList: some View {
+        List {
+            foldersSection
+            if !currentDocumentTags.isEmpty {
+                tagsSection
             }
         }
         .listStyle(.sidebar)
-        .navigationTitle("Fold")
-        .toolbar {
-            if columnVisibility != .detailOnly {
-                ToolbarItem(placement: .primaryAction) {
-                    Button { openFolders() } label: {
-                        Image(systemName: "folder.badge.plus")
+    }
+
+    private var foldersSection: some View {
+        Section {
+            ForEach(folderStore.folders) { folder in
+                FolderSectionRow(
+                    folder: folder,
+                    isExpanded: expandedFolders.contains(folder.id),
+                    openDocumentURLs: openDocumentURLs,
+                    onToggle: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if expandedFolders.contains(folder.id) {
+                                expandedFolders.remove(folder.id)
+                            } else {
+                                expandedFolders.insert(folder.id)
+                            }
+                        }
+                    },
+                    onRemove: {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            folderStore.removeFolder(folder)
+                        }
                     }
-                    .help("Ouvrir un dossier")
+                )
+            }
+        } header: {
+            Text("Dossiers")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+                .padding(.bottom, 2)
+        }
+    }
+
+    private var tagsSection: some View {
+        Section {
+            ForEach(currentDocumentTags, id: \.self) { tag in
+                TagRowView(
+                    tag: tag,
+                    tagStore: tagStore,
+                    isActive: activeTag == tag
+                ) {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        activeTag = activeTag == tag ? nil : tag
+                    }
                 }
             }
+        } header: {
+            Text("Étiquettes")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+                .padding(.bottom, 2)
         }
-        .onAppear { refreshOpenURLs() }
-        .onReceive(windowPublisher) { _ in refreshOpenURLs() }
     }
+
 
     private var windowPublisher: AnyPublisher<Notification, Never> {
         let nc = NotificationCenter.default
@@ -107,6 +146,121 @@ struct SidebarView: View {
         openDocumentURLs = Set(
             NSDocumentController.shared.documents.compactMap { $0.fileURL }
         )
+    }
+}
+
+// MARK: - Résultats de recherche globale
+
+struct GlobalSearchResultsView: View {
+    let store: GlobalSearchStore
+    let query: String
+    let openDocumentURLs: Set<URL>
+
+    // Un seul résultat par fichier (le premier match)
+    private var firstByFile: [GlobalSearchResult] {
+        var seen = Set<URL>()
+        return store.results.filter { seen.insert($0.fileURL).inserted }
+    }
+
+    var body: some View {
+        if store.isSearching {
+            VStack {
+                Spacer()
+                ProgressView().scaleEffect(0.7)
+                Spacer()
+            }
+        } else if store.results.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 24))
+                    .foregroundStyle(.tertiary)
+                Text("Aucun résultat")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+        } else {
+            List {
+                ForEach(firstByFile) { result in
+                    SearchResultRow(result: result, query: query)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10))
+                        .listRowBackground(Color.clear)
+                        .contentShape(Rectangle())
+                        .onTapGesture { openAndJump(to: result) }
+                }
+            }
+            .listStyle(.sidebar)
+        }
+    }
+
+    private func openAndJump(to result: GlobalSearchResult) {
+        let url = result.fileURL
+        _ = url.startAccessingSecurityScopedResource()
+
+        let jump = {
+            NotificationCenter.default.post(
+                name: .foldGlobalSearchJump,
+                object: nil,
+                userInfo: ["query": query]
+            )
+        }
+
+        if let existing = NSDocumentController.shared.document(for: url) {
+            existing.showWindows()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { jump() }
+            return
+        }
+        NSDocumentController.shared.openDocument(withContentsOf: url, display: true) { doc, _, error in
+            if let error {
+                print("Fold openDocument error: \(error.localizedDescription)")
+                NSWorkspace.shared.open(url)
+                return
+            }
+            doc?.showWindows()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { jump() }
+        }
+    }
+}
+
+// MARK: - Ligne de résultat
+
+struct SearchResultRow: View {
+    let result: GlobalSearchResult
+    let query: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            // Nom du fichier
+            HStack(spacing: 5) {
+                Image(systemName: "doc.text")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                Text(result.fileTitle)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+
+            // Extrait avec le mot en couleur
+            highlightedExcerpt
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+    }
+
+    private var highlightedExcerpt: Text {
+        let line = result.lineContent
+        let range = result.matchRange
+
+        let before = String(line[line.startIndex..<range.lowerBound])
+        let match  = String(line[range])
+        let after  = String(line[range.upperBound...])
+
+        return Text(before)
+             + Text(match).foregroundColor(.accentColor)
+             + Text(after)
     }
 }
 
@@ -257,7 +411,7 @@ struct TagRowView: View {
                 }
         }
         .padding(.vertical, 4)
-        .padding(.horizontal, 5)
+        .padding(.trailing, 4)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(isActive
@@ -267,7 +421,7 @@ struct TagRowView: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
-        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+        .listRowInsets(EdgeInsets(top: 1, leading: 28, bottom: 1, trailing: 10))
         .listRowBackground(Color.clear)
         .selectionDisabled()
     }
@@ -313,3 +467,4 @@ struct TagColorPicker: View {
         .frame(width: 240)
     }
 }
+

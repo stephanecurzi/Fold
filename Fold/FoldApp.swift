@@ -9,7 +9,9 @@ extension Notification.Name {
     static let foldFindNext     = Notification.Name("fold.findNext")
     static let foldFindPrev     = Notification.Name("fold.findPrev")
     static let foldFindHide     = Notification.Name("fold.findHide")
-    static let foldAddFolder    = Notification.Name("fold.addFolder")
+    static let foldAddFolder          = Notification.Name("fold.addFolder")
+    static let foldGlobalSearchJump   = Notification.Name("fold.globalSearchJump")
+    static let foldGlobalSearchClear  = Notification.Name("fold.globalSearchClear")
     static let foldPrefsChanged = Notification.Name("fold.prefsChanged")
 }
 
@@ -251,6 +253,7 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+
 
 
 

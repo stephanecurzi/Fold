@@ -217,7 +217,9 @@ final class CenteredTextView: NSTextView {
         nc.addObserver(self, selector: #selector(onNext),         name: .foldFindNext,     object: nil)
         nc.addObserver(self, selector: #selector(onPrev),         name: .foldFindPrev,     object: nil)
         nc.addObserver(self, selector: #selector(onHide),         name: .foldFindHide,     object: nil)
-        nc.addObserver(self, selector: #selector(onPrefsChanged), name: .foldPrefsChanged, object: nil)
+        nc.addObserver(self, selector: #selector(onPrefsChanged),      name: .foldPrefsChanged,      object: nil)
+        nc.addObserver(self, selector: #selector(onGlobalSearchJump),  name: .foldGlobalSearchJump,  object: nil)
+        nc.addObserver(self, selector: #selector(onGlobalSearchClear),  name: .foldGlobalSearchClear,  object: nil)
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -236,6 +238,53 @@ final class CenteredTextView: NSTextView {
     @objc private func onNext(_:    Notification) { find(.nextMatch)            }
     @objc private func onPrev(_:    Notification) { find(.previousMatch)        }
     @objc private func onHide(_:    Notification) { find(.hideFindInterface)    }
+
+    @objc private func onGlobalSearchJump(_ n: Notification) {
+        guard window?.isKeyWindow == true,
+              let query = n.userInfo?["query"] as? String,
+              !query.isEmpty else { return }
+        highlightAllOccurrences(of: query)
+    }
+
+    private func highlightAllOccurrences(of query: String) {
+        guard let lm = layoutManager else { return }
+        let text = string as NSString
+        let fullRange = NSRange(location: 0, length: text.length)
+        let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+
+        // Efface les anciens highlights temporaires
+        lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
+
+        // Highlight de toutes les occurrences
+        var searchRange = fullRange
+        var firstRange: NSRange? = nil
+        while searchRange.location < NSMaxRange(fullRange) {
+            let found = text.range(of: query, options: options, range: searchRange)
+            guard found.location != NSNotFound else { break }
+            lm.addTemporaryAttributes(
+                [.backgroundColor: NSColor.systemOrange.withAlphaComponent(0.35)],
+                forCharacterRange: found
+            )
+            if firstRange == nil { firstRange = found }
+            let next = found.location + found.length
+            searchRange = NSRange(location: next, length: fullRange.length - next)
+        }
+
+        // Scroll et sélection sur la première occurrence
+        if let first = firstRange {
+            setSelectedRange(first)
+            scrollRangeToVisible(first)
+        }
+    }
+
+    @objc private func onGlobalSearchClear(_ n: Notification) { clearGlobalSearchHighlights() }
+
+    /// Efface tous les highlights de recherche globale.
+    func clearGlobalSearchHighlights() {
+        guard let lm = layoutManager else { return }
+        lm.removeTemporaryAttribute(.backgroundColor,
+                                    forCharacterRange: NSRange(location: 0, length: string.count))
+    }
 
     @objc private func onPrefsChanged(_ n: Notification) {
         guard let prefs = n.object as? PreferencesStore,
@@ -278,7 +327,6 @@ final class CenteredTextView: NSTextView {
         }
 
         super.insertText(result, replacementRange: replacementRange)
-
     }
 
     private func isOpeningContext(at pos: Int) -> Bool {
