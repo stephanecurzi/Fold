@@ -192,7 +192,7 @@ struct GlobalSearchResultsView: View {
             List {
                 ForEach(firstByFile) { result in
                     SearchResultRow(result: result, query: query)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10))
+                        .listRowInsets(EdgeInsets(top: 6, leading: 2, bottom: 6, trailing: 10))
                         .listRowBackground(Color.clear)
                         .contentShape(Rectangle())
                         .onTapGesture { openAndJump(to: result) }
@@ -319,7 +319,7 @@ struct FolderSectionRow: View {
             withAnimation(.easeInOut(duration: 0.15)) { isHovered = h }
         }
         .onTapGesture { onToggle() }
-        .listRowInsets(EdgeInsets(top: 2, leading: 10, bottom: 2, trailing: 10))
+        .listRowInsets(EdgeInsets(top: 2, leading: 2, bottom: 2, trailing: 10))
         .listRowBackground(Color.clear)
         .selectionDisabled()
 
@@ -364,7 +364,7 @@ struct SidebarDocRow: View {
                 Label("Révéler dans le Finder", systemImage: "folder")
             }
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+        .listRowInsets(EdgeInsets(top: 1, leading: 2, bottom: 1, trailing: 10))
         .listRowBackground(Color.clear)
         .selectionDisabled()
     }
@@ -429,7 +429,7 @@ struct TagRowView: View {
         .contentShape(Rectangle())
         .onHover { isHovered = $0 }
         .onTapGesture { onTap() }
-        .listRowInsets(EdgeInsets(top: 1, leading: 28, bottom: 1, trailing: 10))
+        .listRowInsets(EdgeInsets(top: 1, leading: 20, bottom: 1, trailing: 10))
         .listRowBackground(Color.clear)
         .selectionDisabled()
     }

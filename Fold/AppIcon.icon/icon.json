@@ -54,44 +54,15 @@
     {
       "layers" : [
         {
-          "fill" : {
-            "solid" : "extended-gray:1.00000,1.00000"
-          },
-          "image-name" : "App Icon Template.png",
-          "name" : "App Icon Template",
-          "opacity" : 0.75
-        }
-      ],
-      "name" : "Group",
-      "position" : {
-        "scale" : 1,
-        "translation-in-points" : [
-          0,
-          0
-        ]
-      },
-      "shadow" : {
-        "kind" : "neutral",
-        "opacity" : 0.5
-      },
-      "specular" : false,
-      "translucency" : {
-        "enabled" : true,
-        "value" : 0.5
-      }
-    },
-    {
-      "layers" : [
-        {
           "blend-mode" : "normal",
           "fill" : {
-            "automatic-gradient" : "extended-gray:1.00000,1.00000"
+            "automatic-gradient" : "extended-gray:0.75000,1.00000"
           },
           "glass" : false,
           "hidden" : false,
           "image-name" : "App Icon Template2.png",
           "name" : "App Icon Template2",
-          "opacity" : 0.5,
+          "opacity" : 0.75,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
@@ -102,12 +73,22 @@
         },
         {
           "fill" : {
-            "automatic-gradient" : "extended-gray:0.00000,1.00000"
+            "solid" : "extended-gray:0.00000,1.00000"
+          },
+          "image-name" : "App Icon Template.png",
+          "name" : "App Icon Template",
+          "opacity" : 0.5
+        },
+        {
+          "blend-mode" : "normal",
+          "fill" : {
+            "automatic-gradient" : "display-p3:0.99608,0.31373,0.00000,1.00000"
           },
           "glass" : false,
+          "hidden" : true,
           "image-name" : "App Icon Template6.png",
           "name" : "App Icon Template6",
-          "opacity" : 0.05,
+          "opacity" : 0.25,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
@@ -117,14 +98,14 @@
           }
         },
         {
-          "blend-mode" : "lighten",
+          "blend-mode" : "normal",
           "fill" : {
             "automatic-gradient" : "extended-gray:1.00000,1.00000"
           },
           "glass" : false,
           "image-name" : "App Icon Template1.png",
           "name" : "App Icon Template1",
-          "opacity" : 0.4,
+          "opacity" : 1,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
