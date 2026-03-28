@@ -278,6 +278,7 @@ final class CenteredTextView: NSTextView {
         }
 
         super.insertText(result, replacementRange: replacementRange)
+
     }
 
     private func isOpeningContext(at pos: Int) -> Bool {
@@ -523,6 +524,7 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
+
 
 
 

@@ -157,6 +157,7 @@ struct FoldApp: App {
         Settings {
             PreferencesView()
                 .environment(prefs)
+                .environment(tagStore)
         }
     }
 

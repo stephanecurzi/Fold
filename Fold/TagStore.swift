@@ -4,8 +4,8 @@ import Observation
 
 private let colorsKey = "fold.tagColors"
 
-// Étiquettes par défaut avec leurs couleurs
-private let defaultTags: [String: String] = [
+// Étiquettes par défaut avec leurs couleurs originales
+let defaultTags: [String: String] = [
     "done":       "#FF383C",
     "inprogress": "#0088FF",
     "design":     "#FE5000"
@@ -19,13 +19,8 @@ final class TagStore {
 
     init() {
         load()
-        // Force les couleurs par défaut (corrige les valeurs obsolètes en UserDefaults)
-        for (tag, color) in defaultTags {
+        for (tag, color) in defaultTags where tagColors[tag] == nil {
             tagColors[tag] = color
-        }
-        // Ajoute les nouvelles étiquettes personnalisées sans écraser
-        for (tag, color) in tagColors where defaultTags[tag] == nil {
-            if tagColors[tag] == nil { tagColors[tag] = color }
         }
         save()
     }
@@ -49,27 +44,52 @@ final class TagStore {
         tag.lowercased() == "done"
     }
 
+    // MARK: - Classification
+
+    var defaultTagNames: [String] { defaultTags.keys.sorted() }
+
+    var customTagNames: [String] {
+        tagColors.keys
+            .filter { defaultTags[$0] == nil }
+            .sorted()
+    }
+
+    func isDefault(_ tag: String) -> Bool {
+        defaultTags[tag] != nil
+    }
+
     // MARK: - Couleurs
 
     func color(for tag: String) -> NSColor {
-        NSColor(hex: tagColors[tag] ?? colorForNew(tag)) ?? .tertiaryLabelColor
+        if let hex = tagColors[tag] {
+            return NSColor(hex: hex) ?? .tertiaryLabelColor
+        }
+        return .tertiaryLabelColor
     }
 
     func swiftUIColor(for tag: String) -> Color {
         Color(nsColor: color(for: tag))
     }
 
+    /// Enregistre la couleur d'un tag. C'est le seul endroit où un tag
+    /// personnalisé est créé — uniquement quand l'utilisateur choisit une couleur.
     func setColor(_ hex: String, for tag: String) {
         tagColors[tag] = hex
         save()
     }
 
-    @discardableResult
-    func colorForNew(_ tag: String) -> String {
-        if let existing = tagColors[tag] { return existing }
-        tagColors[tag] = "#8E8E93"
+    /// Réinitialise une étiquette par défaut à sa couleur d'origine.
+    func resetToDefault(_ tag: String) {
+        guard let original = defaultTags[tag] else { return }
+        tagColors[tag] = original
         save()
-        return "#8E8E93"
+    }
+
+    /// Supprime une étiquette personnalisée.
+    func removeTag(_ tag: String) {
+        guard !isDefault(tag) else { return }
+        tagColors.removeValue(forKey: tag)
+        save()
     }
 
     // MARK: - Persistance
