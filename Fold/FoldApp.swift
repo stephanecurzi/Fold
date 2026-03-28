@@ -22,8 +22,6 @@ extension Notification.Name {
 class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Si aucune fenêtre n'est déjà ouverte (ex. ouverture depuis Finder),
-        // on crée un document vide directement — sans sélecteur de fichier.
         if NSApp.windows.filter({ $0.isVisible }).isEmpty {
             NSDocumentController.shared.newDocument(nil)
         }
@@ -52,6 +50,7 @@ struct FoldApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
+        _ = RawTextWindowController.shared  // force l'init du singleton
     }
 
     var body: some Scene {
@@ -163,6 +162,13 @@ struct FoldApp: App {
                     .keyboardShortcut("-", modifiers: .command)
                 Button("Taille par défaut") { prefs.zoomReset() }
                     .keyboardShortcut("0", modifiers: .command)
+                Divider()
+                Button("Afficher le texte brut") {
+                    if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+                        RawTextWindowController.shared.show(text: tv.string)
+                    }
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
             }
         }
         Settings {
@@ -262,7 +268,4 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
-
-
-
 

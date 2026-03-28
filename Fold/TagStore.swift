@@ -6,7 +6,7 @@ private let colorsKey = "fold.tagColors"
 
 // Étiquettes par défaut avec leurs couleurs originales
 let defaultTags: [String: String] = [
-    "done":       "#FF383C",
+    "done":       "#C50018",
     "inprogress": "#0088FF",
     "design":     "#FE5000"
 ]

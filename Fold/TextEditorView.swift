@@ -169,6 +169,12 @@ struct CenteredEditorView: NSViewRepresentable {
         func textDidChange(_ n: Notification) {
             guard let tv = n.object as? NSTextView else { return }
             parent.text = tv.string
+            // Mise à jour live de la fenêtre raw si elle est déjà visible
+            NotificationCenter.default.post(
+                name: .foldRawUpdate,
+                object: nil,
+                userInfo: ["text": tv.string]
+            )
         }
 
         func textView(_ tv: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -179,11 +185,9 @@ struct CenteredEditorView: NSViewRepresentable {
 
             guard let url else { return false }
 
-            // Lien wiki [[titre]] → ouvre le fichier dans les dossiers ouverts
             if url.scheme == "fold-wiki" {
-                // Utilise path (triple slash) pour préserver la casse et les espaces
-                let raw = url.path  // ex: "/Mon Document"
-                let title = String(raw.dropFirst())  // retire le "/" initial
+                let raw = url.path
+                let title = String(raw.dropFirst())
                     .removingPercentEncoding ?? raw
                 NotificationCenter.default.post(
                     name: .foldWikiLink,
@@ -226,14 +230,14 @@ final class CenteredTextView: NSTextView {
         guard window != nil else { return }
         let nc = NotificationCenter.default
         nc.removeObserver(self)
-        nc.addObserver(self, selector: #selector(onSearch),       name: .foldSearch,       object: nil)
-        nc.addObserver(self, selector: #selector(onReplace),      name: .foldReplace,      object: nil)
-        nc.addObserver(self, selector: #selector(onNext),         name: .foldFindNext,     object: nil)
-        nc.addObserver(self, selector: #selector(onPrev),         name: .foldFindPrev,     object: nil)
-        nc.addObserver(self, selector: #selector(onHide),         name: .foldFindHide,     object: nil)
+        nc.addObserver(self, selector: #selector(onSearch),            name: .foldSearch,            object: nil)
+        nc.addObserver(self, selector: #selector(onReplace),           name: .foldReplace,           object: nil)
+        nc.addObserver(self, selector: #selector(onNext),              name: .foldFindNext,          object: nil)
+        nc.addObserver(self, selector: #selector(onPrev),              name: .foldFindPrev,          object: nil)
+        nc.addObserver(self, selector: #selector(onHide),              name: .foldFindHide,          object: nil)
         nc.addObserver(self, selector: #selector(onPrefsChanged),      name: .foldPrefsChanged,      object: nil)
         nc.addObserver(self, selector: #selector(onGlobalSearchJump),  name: .foldGlobalSearchJump,  object: nil)
-        nc.addObserver(self, selector: #selector(onGlobalSearchClear),  name: .foldGlobalSearchClear,  object: nil)
+        nc.addObserver(self, selector: #selector(onGlobalSearchClear), name: .foldGlobalSearchClear, object: nil)
     }
 
     deinit { NotificationCenter.default.removeObserver(self) }
@@ -266,10 +270,8 @@ final class CenteredTextView: NSTextView {
         let fullRange = NSRange(location: 0, length: text.length)
         let options: NSString.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
 
-        // Efface les anciens highlights temporaires
         lm.removeTemporaryAttribute(.backgroundColor, forCharacterRange: fullRange)
 
-        // Highlight de toutes les occurrences
         var searchRange = fullRange
         var firstRange: NSRange? = nil
         while searchRange.location < NSMaxRange(fullRange) {
@@ -284,7 +286,6 @@ final class CenteredTextView: NSTextView {
             searchRange = NSRange(location: next, length: fullRange.length - next)
         }
 
-        // Scroll et sélection sur la première occurrence
         if let first = firstRange {
             setSelectedRange(first)
             scrollRangeToVisible(first)
@@ -293,7 +294,6 @@ final class CenteredTextView: NSTextView {
 
     @objc private func onGlobalSearchClear(_ n: Notification) { clearGlobalSearchHighlights() }
 
-    /// Efface tous les highlights de recherche globale.
     func clearGlobalSearchHighlights() {
         guard let lm = layoutManager else { return }
         lm.removeTemporaryAttribute(.backgroundColor,
@@ -330,10 +330,8 @@ final class CenteredTextView: NSTextView {
 
         var result = input
 
-        // Apostrophe droite → apostrophe typographique
         result = result.replacingOccurrences(of: "'", with: "\u{2019}")
 
-        // Guillemets doubles → guillemets français avec espace fine insécable
         if result == "\"" {
             result = isOpeningContext(at: cursorPos)
                 ? "«\u{202F}"
@@ -371,10 +369,6 @@ final class CenteredTextView: NSTextView {
     }
 
     // MARK: - Typing attributes — évite le curseur minuscule en début de ligne
-    // hide() dans MarkdownTextStorage applique une police de 0.01 pt pour masquer
-    // les marqueurs Markdown. Si le curseur se retrouve sur ces caractères cachés,
-    // NSTextView hérite de cette police pour les typingAttributes → curseur minuscule.
-    // On intercepte le getter pour garantir une taille minimale cohérente.
 
     override var typingAttributes: [NSAttributedString.Key: Any] {
         get {
@@ -408,10 +402,8 @@ final class CenteredTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         switch event.keyCode {
         case 48 where !event.modifierFlags.contains(.shift):
-            // Tab → vrai caractère tabulation
             insertText("\t", replacementRange: selectedRange())
         case 36:
-            // Return → continuation de liste si applicable
             if !handleListContinuation() {
                 super.keyDown(with: event)
             }
@@ -432,7 +424,6 @@ final class CenteredTextView: NSTextView {
         let nsLine = line as NSString
         let lr = NSRange(location: 0, length: nsLine.length)
 
-        // ── Liste de tâches ──
         if let m = rx(#"^(\s*)(- \[[ x]\] )(.+)$"#).firstMatch(in: line, range: lr) {
             if m.range(at: 3).length == 0 {
                 insertText("\n", replacementRange: lineRange)
@@ -443,7 +434,6 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Liste non ordonnée ──
         if let m = rx(#"^(\s*)([-*+]) (.+)$"#).firstMatch(in: line, range: lr) {
             let indent = nsLine.substring(with: m.range(at: 1))
             let bullet = nsLine.substring(with: m.range(at: 2))
@@ -451,13 +441,11 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Ligne vide non ordonnée → supprimer ──
         if rx(#"^(\s*)([-*+]) $"#).firstMatch(in: line, range: lr) != nil {
             insertText("\n", replacementRange: lineRange)
             return true
         }
 
-        // ── Liste ordonnée ──
         if let m = rx(#"^(\s*)(\d+)\. (.+)$"#).firstMatch(in: line, range: lr) {
             let indent  = nsLine.substring(with: m.range(at: 1))
             let numStr  = nsLine.substring(with: m.range(at: 2))
@@ -466,7 +454,6 @@ final class CenteredTextView: NSTextView {
             return true
         }
 
-        // ── Ligne vide ordonnée → supprimer ──
         if rx(#"^(\s*)\d+\. $"#).firstMatch(in: line, range: lr) != nil {
             insertText("\n", replacementRange: lineRange)
             return true
@@ -586,7 +573,4 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
-
-
-
 
