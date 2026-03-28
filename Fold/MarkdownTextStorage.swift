@@ -244,6 +244,7 @@ final class MarkdownTextStorage: NSTextStorage {
             .backgroundColor: NSColor.systemYellow.withAlphaComponent(0.45)
         ])
         inlineLinks(text, full)
+        inlineWikiLinks(text, full)
         inlineAll(#"@[\w]+"#, text, full, attrs: [
             .foregroundColor: NSColor.tertiaryLabelColor
         ])
@@ -490,6 +491,35 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
+    private func inlineWikiLinks(_ text: String, _ full: NSRange) {
+        // Regex : [[titre]] — on évite les raw strings pour contrôler l'échappement
+        guard let wikiRx = try? NSRegularExpression(pattern: "\\[\\[([^\\]\n]+)\\]\\]") else { return }
+        wikiRx.enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
+            guard let self, let m else { return }
+            let outer   = m.range(at: 0)
+            let nameCap = m.range(at: 1)
+            guard valid(nameCap), valid(outer) else { return }
+            let name = (text as NSString).substring(with: nameCap)
+            let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+            let wikiURL = URL(string: "fold-wiki:///" + encoded)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.systemBlue,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .link: wikiURL as Any
+            ]
+            if cursorTouches(outer) {
+                backing.addAttributes(attrs, range: outer)
+            } else {
+                hide(at: outer.location, length: 2)
+                let closingLoc = nameCap.location + nameCap.length
+                if closingLoc + 2 <= backing.length {
+                    hide(at: closingLoc, length: 2)
+                }
+                backing.addAttributes(attrs, range: nameCap)
+            }
+        }
+    }
+
     private func inlineHashtags(_ text: String) {
         let lines = text.components(separatedBy: "\n")
         var offset = 0
@@ -561,4 +591,5 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
+
 

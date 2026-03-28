@@ -172,15 +172,29 @@ struct CenteredEditorView: NSViewRepresentable {
         }
 
         func textView(_ tv: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
-            if let url = link as? URL {
-                NSWorkspace.shared.open(url)
+            let url: URL?
+            if let u = link as? URL { url = u }
+            else if let s = link as? String { url = URL(string: s) }
+            else { return false }
+
+            guard let url else { return false }
+
+            // Lien wiki [[titre]] → ouvre le fichier dans les dossiers ouverts
+            if url.scheme == "fold-wiki" {
+                // Utilise path (triple slash) pour préserver la casse et les espaces
+                let raw = url.path  // ex: "/Mon Document"
+                let title = String(raw.dropFirst())  // retire le "/" initial
+                    .removingPercentEncoding ?? raw
+                NotificationCenter.default.post(
+                    name: .foldWikiLink,
+                    object: nil,
+                    userInfo: ["title": title]
+                )
                 return true
             }
-            if let str = link as? String, let url = URL(string: str) {
-                NSWorkspace.shared.open(url)
-                return true
-            }
-            return false
+
+            NSWorkspace.shared.open(url)
+            return true
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {

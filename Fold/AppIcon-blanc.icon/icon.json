@@ -1,36 +1,14 @@
 {
   "fill" : {
-    "linear-gradient" : [
-      "display-p3:0.99608,0.48431,0.24902,1.00000",
-      "srgb:0.99608,0.31373,0.00000,1.00000"
-    ],
-    "orientation" : {
-      "start" : {
-        "x" : 0.5,
-        "y" : 0
-      },
-      "stop" : {
-        "x" : 0.5,
-        "y" : 0.7
-      }
-    }
+    "automatic-gradient" : "extended-gray:1.00000,1.00000"
   },
   "groups" : [
     {
-      "blend-mode" : "normal",
       "layers" : [
         {
-          "fill-specializations" : [
-            {
-              "value" : {
-                "solid" : "extended-gray:0.00000,1.00000"
-              }
-            },
-            {
-              "appearance" : "dark",
-              "value" : "automatic"
-            }
-          ],
+          "fill" : {
+            "solid" : "extended-gray:0.00000,1.00000"
+          },
           "image-name" : "App Icon Template5.png",
           "name" : "App Icon Template5",
           "position" : {
@@ -54,9 +32,12 @@
     {
       "layers" : [
         {
+          "fill" : {
+            "solid" : "extended-gray:1.00000,1.00000"
+          },
           "image-name" : "App Icon Template.png",
           "name" : "App Icon Template",
-          "opacity" : 0.25
+          "opacity" : 1
         }
       ],
       "name" : "Group",
@@ -82,7 +63,7 @@
         {
           "blend-mode" : "normal",
           "fill" : {
-            "automatic-gradient" : "extended-gray:0.75000,1.00000"
+            "automatic-gradient" : "extended-gray:1.00000,1.00000"
           },
           "glass" : false,
           "hidden" : false,
@@ -99,12 +80,12 @@
         },
         {
           "fill" : {
-            "automatic-gradient" : "extended-gray:0.00000,1.00000"
+            "automatic-gradient" : "extended-gray:1.00000,1.00000"
           },
           "glass" : false,
           "image-name" : "App Icon Template6.png",
           "name" : "App Icon Template6",
-          "opacity" : 0.05,
+          "opacity" : 0.15,
           "position" : {
             "scale" : 1,
             "translation-in-points" : [
@@ -115,7 +96,20 @@
         },
         {
           "fill" : {
-            "automatic-gradient" : "extended-gray:1.00000,1.00000"
+            "linear-gradient" : [
+              "srgb:1.00000,0.48622,0.25000,1.00000",
+              "srgb:0.99608,0.31373,0.00000,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.5,
+                "y" : 0
+              },
+              "stop" : {
+                "x" : 0.5,
+                "y" : 0.7
+              }
+            }
           },
           "glass" : false,
           "image-name" : "App Icon Template1.png",

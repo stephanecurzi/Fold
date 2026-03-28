@@ -45,6 +45,14 @@ struct SidebarView: View {
                 globalSearch.bind(to: folderStore)
             }
             .onReceive(windowPublisher) { _ in refreshOpenURLs() }
+        .onReceive(NotificationCenter.default.publisher(for: .foldFocusSearch)) { _ in
+            // Déclenche le champ de recherche natif
+            NSApp.keyWindow?.toolbar?.visibleItems?.forEach { item in
+                if let searchField = item.view as? NSSearchField {
+                    searchField.becomeFirstResponder()
+                }
+            }
+        }
     }
 
     @ViewBuilder

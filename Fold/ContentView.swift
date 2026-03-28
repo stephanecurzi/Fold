@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 private let sidebarVisibilityKey = "fold.sidebarVisible"
 
@@ -44,7 +45,43 @@ struct ContentView: View {
                 activeTag = nil
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .foldWikiLink)) { n in
+            guard let title = n.userInfo?["title"] as? String else { return }
+            openWikiLink(title: title)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .foldFocusSearch)) { _ in
+            // Handled in SidebarView via the same notification
+        }
+    }
+
+    // MARK: - Wiki link resolution
+
+    private func openWikiLink(title: String) {
+        let lower = title.lowercased()
+        // Cherche dans tous les dossiers ouverts
+        for folder in folderStore.folders {
+            if let match = folder.documents.first(where: {
+                $0.title.lowercased() == lower
+            }) {
+                let url = match.fileURL
+                _ = url.startAccessingSecurityScopedResource()
+                if let existing = NSDocumentController.shared.document(for: url) {
+                    existing.showWindows()
+                    return
+                }
+                NSDocumentController.shared.openDocument(
+                    withContentsOf: url, display: true
+                ) { doc, _, _ in doc?.showWindows() }
+                return
+            }
+        }
+        // Aucun fichier trouvé — on l'indique brièvement dans la barre titre
+        NSApp.keyWindow?.title = "« \(title) » introuvable"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            NSApp.keyWindow?.title = "Fold"
+        }
     }
 }
+
 
 

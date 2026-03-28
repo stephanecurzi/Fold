@@ -12,6 +12,8 @@ extension Notification.Name {
     static let foldAddFolder          = Notification.Name("fold.addFolder")
     static let foldGlobalSearchJump   = Notification.Name("fold.globalSearchJump")
     static let foldGlobalSearchClear  = Notification.Name("fold.globalSearchClear")
+    static let foldWikiLink           = Notification.Name("fold.wikiLink")
+    static let foldFocusSearch        = Notification.Name("fold.focusSearch")
     static let foldPrefsChanged = Notification.Name("fold.prefsChanged")
 }
 
@@ -72,6 +74,11 @@ struct FoldApp: App {
             CommandGroup(replacing: .windowArrangement) {}
 
             CommandGroup(replacing: .textEditing) {
+                Button("Recherche globale") {
+                    NotificationCenter.default.post(name: .foldFocusSearch, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: [.command, .shift, .option])
+
                 Button("Rechercher…") {
                     NotificationCenter.default.post(name: .foldSearch, object: nil)
                 }
@@ -145,6 +152,8 @@ struct FoldApp: App {
                 Divider()
                 Button("Lien") { wrapSelection("[", "](url)") }
                     .keyboardShortcut("k", modifiers: .command)
+                Button("Lien wiki") { wrapSelection("[[", "]]") }
+                    .keyboardShortcut("k", modifiers: [.command, .shift])
                 Divider()
                 Button("Supprimer les styles") { removeFormatting() }
                 Divider()
