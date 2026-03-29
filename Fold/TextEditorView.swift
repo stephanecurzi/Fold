@@ -397,21 +397,6 @@ final class CenteredTextView: NSTextView {
         textContainerInset = NSSize(width: horizontalInset, height: 50)
     }
 
-    // MARK: - Clavier
-
-    override func keyDown(with event: NSEvent) {
-        switch event.keyCode {
-        case 48 where !event.modifierFlags.contains(.shift):
-            insertText("\t", replacementRange: selectedRange())
-        case 36:
-            if !handleListContinuation() {
-                super.keyDown(with: event)
-            }
-        default:
-            super.keyDown(with: event)
-        }
-    }
-
     // MARK: - Continuation de liste
 
     @discardableResult
@@ -462,27 +447,139 @@ final class CenteredTextView: NSTextView {
         return false
     }
 
-    // Double-clic → fold/unfold heading
+    // MARK: - Fold / Unfold
+
+    /// Clic simple sur une pill → déplie. ⌘-clic sur un titre → replie/déplie.
     override func mouseDown(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+
+        // Clic simple sur une pill → unfold (calcul du rect à la volée, pas de cache)
+        if event.clickCount == 1,
+           let lm = layoutManager as? FoldLayoutManager,
+           let storage = textStorage as? MarkdownTextStorage,
+           !storage.foldedHeadings.isEmpty {
+
+            let text   = storage.string as NSString
+            let map    = storage.headingMap(for: storage.string)
+            let origin = lm.textContainers.first.map { _ in textContainerOrigin } ?? .zero
+
+            for foldedStart in storage.foldedHeadings {
+                guard foldedStart < storage.length else { continue }
+                let headingLineRange = text.lineRange(for: NSRange(location: foldedStart, length: 0))
+                let titleLen = max(0, headingLineRange.length - 1)
+                guard titleLen > 0 else { continue }
+
+                let glRange = lm.glyphRange(
+                    forCharacterRange: NSRange(location: headingLineRange.location, length: titleLen),
+                    actualCharacterRange: nil)
+                var usedRect = CGRect.null
+                lm.enumerateLineFragments(forGlyphRange: glRange) { _, used, _, _, _ in
+                    usedRect = used
+                }
+                guard !usedRect.isNull else { continue }
+
+                let pillH = CGFloat(14)
+                let pillW = CGFloat(36)
+                let pillX = origin.x + usedRect.maxX + 12
+                let pillY = origin.y + usedRect.midY - pillH / 2 - 2
+                let pillRect = CGRect(x: pillX, y: pillY, width: pillW, height: pillH)
+
+                if pillRect.insetBy(dx: -4, dy: -4).contains(point) {
+                    storage.foldedHeadings.remove(foldedStart)
+                    refreshFolding(storage: storage)
+                    return
+                }
+            }
+        }
+
+        if event.modifierFlags.contains(.command) && event.clickCount == 1 {
+            let adjustedPt = NSPoint(x: point.x - textContainerInset.width,
+                                     y: point.y - textContainerInset.height)
+            var fraction: CGFloat = 0
+            let glyph    = layoutManager?.glyphIndex(for: adjustedPt,
+                                                      in: textContainer!,
+                                                      fractionOfDistanceThroughGlyph: &fraction) ?? 0
+            let charIdx  = layoutManager?.characterIndexForGlyph(at: glyph) ?? 0
+            if toggleFold(at: charIdx) { return }
+        }
         super.mouseDown(with: event)
-        if event.clickCount == 2 { toggleFoldAtCursor() }
     }
 
-    private func toggleFoldAtCursor() {
-        guard let storage = textStorage as? MarkdownTextStorage else { return }
-        let charIndex = selectedRange().location
-        let text = string as NSString
-        let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
-        let line = text.substring(with: lineRange)
+    /// Tab sur une ligne de titre → replie/déplie (familier pour les utilisateurs Folding Text / Bike).
+    override func keyDown(with event: NSEvent) {
+        switch event.keyCode {
+        case 48 where !event.modifierFlags.contains(.shift):
+            // Tab : sur titre → fold, sinon → tabulation normale
+            let charIdx = selectedRange().location
+            if !toggleFold(at: charIdx) {
+                insertText("\t", replacementRange: selectedRange())
+            }
+        case 36:
+            if !handleListContinuation() { super.keyDown(with: event) }
+        default:
+            super.keyDown(with: event)
+        }
+    }
+
+    /// Tente de replier/déplier la section du titre à `charIndex`.
+    /// Retourne `true` si on était bien sur un titre.
+    @discardableResult
+    private func toggleFold(at charIndex: Int) -> Bool {
+        guard let storage = textStorage as? MarkdownTextStorage else { return false }
+        let text      = string as NSString
+        let lineRange = text.lineRange(for: NSRange(location: min(charIndex, text.length), length: 0))
+        let line      = text.substring(with: lineRange)
         guard let rxObj = try? NSRegularExpression(pattern: #"^#{1,6}[ \t]"#),
-              rxObj.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
-        else { return }
+              rxObj.firstMatch(in: line,
+                               range: NSRange(location: 0, length: (line as NSString).length)) != nil
+        else { return false }
+
         let lineStart = lineRange.location
         if storage.foldedHeadings.contains(lineStart) {
             storage.foldedHeadings.remove(lineStart)
         } else {
             storage.foldedHeadings.insert(lineStart)
         }
+        storage.beginEditing()
+        storage.edited(.editedAttributes,
+                       range: NSRange(location: 0, length: storage.length),
+                       changeInLength: 0)
+        storage.endEditing()
+        needsDisplay = true
+        return true
+    }
+
+    // MARK: - Fold curseur-centré
+
+    /// Replie/déplie la section qui contient le curseur, quel que soit l'endroit dans la section.
+    func foldEnclosingSection() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        let charIndex = selectedRange().location
+        let map = storage.headingMap(for: storage.string)
+        guard let heading = map.last(where: { $0.offset <= charIndex }) else { return }
+        if storage.foldedHeadings.contains(heading.offset) {
+            storage.foldedHeadings.remove(heading.offset)
+        } else {
+            storage.foldedHeadings.insert(heading.offset)
+        }
+        refreshFolding(storage: storage)
+    }
+
+    /// Replie tous les titres du document.
+    func foldAllSections() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        storage.foldedHeadings = Set(storage.headingMap(for: storage.string).map { $0.offset })
+        refreshFolding(storage: storage)
+    }
+
+    /// Déplie tous les titres du document.
+    func unfoldAllSections() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        storage.foldedHeadings.removeAll()
+        refreshFolding(storage: storage)
+    }
+
+    private func refreshFolding(storage: MarkdownTextStorage) {
         storage.beginEditing()
         storage.edited(.editedAttributes,
                        range: NSRange(location: 0, length: storage.length),
@@ -502,13 +599,44 @@ final class CenteredTextView: NSTextView {
     }
 }
 
-// MARK: - FoldLayoutManager — barre verticale gauche pour les citations
+// MARK: - FoldLayoutManager — citations + replis de sections
 
 final class FoldLayoutManager: NSLayoutManager {
 
     private let barWidth:  CGFloat = 3
     private let barInset:  CGFloat = 6
     private let barRadius: CGFloat = 1.5
+
+    // MARK: - Repli : glyphes nuls pour les sections cachées
+
+    /// Intercepte la génération des glyphes : tout caractère marqué `.foldHidden`
+    /// devient un glyphe `.null` — invisible ET sans espace de layout.
+    override func setGlyphs(_ glyphs: UnsafePointer<CGGlyph>,
+                             properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+                             characterIndexes charIndexes: UnsafePointer<Int>,
+                             font aFont: NSFont,
+                             forGlyphRange glyphRange: NSRange) {
+        guard let storage = textStorage else {
+            super.setGlyphs(glyphs, properties: props, characterIndexes: charIndexes,
+                            font: aFont, forGlyphRange: glyphRange)
+            return
+        }
+        let count = glyphRange.length
+        var modifiedProps = Array(UnsafeBufferPointer(start: props, count: count))
+        for i in 0..<count {
+            let charIndex = charIndexes[i]
+            guard charIndex < storage.length else { continue }
+            if storage.attribute(.foldHidden, at: charIndex, effectiveRange: nil) != nil {
+                modifiedProps[i] = .null
+            }
+        }
+        modifiedProps.withUnsafeBufferPointer { ptr in
+            super.setGlyphs(glyphs, properties: ptr.baseAddress!,
+                            characterIndexes: charIndexes, font: aFont, forGlyphRange: glyphRange)
+        }
+    }
+
+    // MARK: - Rendu fond + indicateurs
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
@@ -519,7 +647,73 @@ final class FoldLayoutManager: NSLayoutManager {
                  storage: storage, container: container, origin: origin)
         drawBars(for: .foldCodeblock, color: .separatorColor, in: charRange,
                  storage: storage, container: container, origin: origin)
+        if let mkStorage = storage as? MarkdownTextStorage, !mkStorage.foldedHeadings.isEmpty {
+            drawInlineFoldIndicators(storage: mkStorage, charRange: charRange, origin: origin)
+        }
     }
+
+    // MARK: - Indicateur inline — badge compact
+
+    private func drawInlineFoldIndicators(storage: MarkdownTextStorage,
+                                          charRange: NSRange,
+                                          origin: NSPoint) {
+        let text   = storage.string
+        let nsText = text as NSString
+        let map    = storage.headingMap(for: text)
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+
+        let pillBg = NSColor.controlAccentColor
+
+        for foldedStart in storage.foldedHeadings {
+            guard foldedStart < storage.length else { continue }
+            guard map.first(where: { $0.offset == foldedStart }) != nil else { continue }
+
+            let headingLineRange = nsText.lineRange(for: NSRange(location: foldedStart, length: 0))
+            guard NSIntersectionRange(headingLineRange, charRange).length > 0 else { continue }
+
+            let titleLen = max(0, headingLineRange.length - 1)
+            guard titleLen > 0 else { continue }
+            let glRange = glyphRange(
+                forCharacterRange: NSRange(location: headingLineRange.location, length: titleLen),
+                actualCharacterRange: nil)
+            var usedRect = CGRect.null
+            enumerateLineFragments(forGlyphRange: glRange) { _, used, _, _, _ in
+                usedRect = used
+            }
+            guard !usedRect.isNull else { continue }
+
+            // Pill : largeur fixe, 3 cercles dessinés
+            let pillH: CGFloat = 14
+            let pillW: CGFloat = 36
+            let pillR: CGFloat = pillH / 2
+
+            let pillX = origin.x + usedRect.maxX + 12
+            let pillY = origin.y + usedRect.midY - pillH / 2 - 2   // -2 px pour aligner sur baseline
+            let pillRect = CGRect(x: pillX, y: pillY, width: pillW, height: pillH)
+            let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillR, yRadius: pillR)
+
+            pillBg.setFill()
+            pillPath.fill()
+
+            // 3 cercles dessinés à la main — parfaitement centrés dans la pill
+            let dotR:     CGFloat = 2.0
+            let dotSpacing: CGFloat = 6.0
+            let totalW  = dotR * 2 * 3 + dotSpacing * 2
+            let dotStartX = pillRect.midX - totalW / 2 + dotR
+            let dotY      = pillRect.midY   // centre vertical exact
+
+            for i in 0..<3 {
+                let cx = dotStartX + CGFloat(i) * (dotR * 2 + dotSpacing)
+                let dotRect = CGRect(x: cx - dotR, y: dotY - dotR,
+                                     width: dotR * 2, height: dotR * 2)
+                let dot = NSBezierPath(ovalIn: dotRect)
+                NSColor.white.setFill()
+                dot.fill()
+            }
+        }
+    }
+
+    // MARK: - Barres verticales (citations / code) — ignorent les ranges repliés
 
     private func drawBars(for key: NSAttributedString.Key,
                           color: NSColor,
@@ -527,7 +721,6 @@ final class FoldLayoutManager: NSLayoutManager {
                           storage: NSTextStorage,
                           container: NSTextContainer,
                           origin: NSPoint) {
-
         var markedRects: [CGRect] = []
         var pos = charRange.location
         let end = charRange.location + charRange.length
@@ -538,10 +731,17 @@ final class FoldLayoutManager: NSLayoutManager {
                                           in: charRange)
             let runEnd = min(effectiveRange.location + effectiveRange.length, end)
             if value != nil {
-                let glRange = glyphRange(forCharacterRange: NSRange(location: pos, length: runEnd - pos),
-                                         actualCharacterRange: nil)
-                enumerateLineFragments(forGlyphRange: glRange) { rect, _, _, _, _ in
-                    markedRects.append(rect)
+                // Ne dessine la barre que si le contenu n'est pas caché par un repli
+                let runRange = NSRange(location: pos, length: runEnd - pos)
+                var hiddenRange = NSRange(location: NSNotFound, length: 0)
+                let isHidden = storage.attribute(.foldHidden, at: pos,
+                                                  longestEffectiveRange: &hiddenRange,
+                                                  in: runRange) != nil
+                if !isHidden {
+                    let glRange = glyphRange(forCharacterRange: runRange, actualCharacterRange: nil)
+                    enumerateLineFragments(forGlyphRange: glRange) { rect, _, _, _, _ in
+                        markedRects.append(rect)
+                    }
                 }
             }
             pos = runEnd
@@ -553,10 +753,8 @@ final class FoldLayoutManager: NSLayoutManager {
         var groupRect = markedRects[0]
 
         func drawBar(rect: CGRect) {
-            let barRect = CGRect(x: barX,
-                                 y: origin.y + rect.minY,
-                                 width: barWidth,
-                                 height: rect.height)
+            let barRect = CGRect(x: barX, y: origin.y + rect.minY,
+                                 width: barWidth, height: rect.height)
             color.setFill()
             NSBezierPath(roundedRect: barRect, xRadius: barRadius, yRadius: barRadius).fill()
         }
@@ -573,4 +771,7 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
+
+
+
 

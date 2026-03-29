@@ -7,6 +7,8 @@ private let kFoldMark = NSNumber(value: 1)
 extension NSAttributedString.Key {
     static let foldBlockquote = NSAttributedString.Key("fold.blockquote")
     static let foldCodeblock  = NSAttributedString.Key("fold.codeblock")
+    /// Contenu caché par un repli de titre — lu par FoldLayoutManager pour rendre les glyphes nuls
+    static let foldHidden     = NSAttributedString.Key("fold.hidden")
 }
 
 final class MarkdownTextStorage: NSTextStorage {
@@ -77,6 +79,7 @@ final class MarkdownTextStorage: NSTextStorage {
         applyTagLineColors(text: text)
         applyTagCollapse(text: text)
         applyFencedCodeBlocks(text: text)   // En dernier — écrase tout formatage inline à l'intérieur
+        applyFolding(text: text)            // Après tout le reste — marque les sections repliées
     }
 
     // MARK: - Block Elements
@@ -392,6 +395,79 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
+    // MARK: - Section Folding
+
+    /// Construit une carte (offset, niveau) de tous les titres du texte.
+    func headingMap(for text: String) -> [(offset: Int, level: Int)] {
+        var map: [(offset: Int, level: Int)] = []
+        var offset = 0
+        for line in text.components(separatedBy: "\n") {
+            let len = (line as NSString).length
+            if let m = rx(#"^(#{1,6})[ \t]"#).firstMatch(in: line,
+                                                           range: NSRange(location: 0, length: len)) {
+                map.append((offset: offset, level: m.range(at: 1).length))
+            }
+            offset += len + 1
+        }
+        return map
+    }
+
+    /// Retourne la plage de caractères à cacher pour un titre replié donné.
+    func foldedRange(for headingOffset: Int, level: Int,
+                     text: String, map: [(offset: Int, level: Int)]) -> NSRange? {
+        let nsText = text as NSString
+        let lineRange = nsText.lineRange(for: NSRange(location: headingOffset, length: 0))
+        // La section commence juste après le \n du titre
+        let sectionStart = lineRange.location + lineRange.length
+        guard sectionStart < nsText.length else { return nil }
+        // Fin = début du prochain titre de niveau ≤ au titre courant
+        var sectionEnd = nsText.length
+        if let idx = map.firstIndex(where: { $0.offset == headingOffset }) {
+            for next in map[(idx + 1)...] where next.level <= level {
+                sectionEnd = next.offset
+                break
+            }
+        }
+        guard sectionStart < sectionEnd else { return nil }
+        return NSRange(location: sectionStart, length: sectionEnd - sectionStart)
+    }
+
+    private func applyFolding(text: String) {
+        guard !foldedHeadings.isEmpty else { return }
+        let map = headingMap(for: text)
+
+        for foldedStart in foldedHeadings {
+            guard foldedStart < backing.length else { continue }
+            guard let entry = map.first(where: { $0.offset == foldedStart }) else { continue }
+
+            // ── Marque le contenu caché ─────────────────────────────────────
+            if let hidden = foldedRange(for: foldedStart, level: entry.level,
+                                        text: text, map: map),
+               valid(hidden) {
+                backing.addAttribute(.foldHidden, value: kFoldMark, range: hidden)
+            }
+
+            // ── Ajoute un paragraphSpacing au titre replié ──────────────────
+            // Donne environ une hauteur de ligne de respiration visuelle sous le titre.
+            let nsText = text as NSString
+            let headingLineRange = nsText.lineRange(
+                for: NSRange(location: foldedStart, length: 0))
+            // On utilise le paragraphStyle existant comme base pour ne pas écraser
+            // le font/color du titre, et on y ajoute juste le spacing.
+            let existing = backing.attribute(.paragraphStyle,
+                                             at: foldedStart,
+                                             effectiveRange: nil) as? NSParagraphStyle
+            let ps = (existing?.mutableCopy() as? NSMutableParagraphStyle)
+                     ?? NSMutableParagraphStyle()
+            ps.paragraphSpacing = fontSize   // ≈ une ligne de corps
+            let titleContentRange = NSRange(location: headingLineRange.location,
+                                            length: max(0, headingLineRange.length - 1))
+            if valid(titleContentRange) {
+                backing.addAttribute(.paragraphStyle, value: ps, range: titleContentRange)
+            }
+        }
+    }
+
     // MARK: - Inline helpers
 
     private func inline(_ pattern: String, _ text: String, _ range: NSRange,
@@ -591,5 +667,6 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
+
 
 

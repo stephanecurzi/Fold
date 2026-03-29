@@ -81,27 +81,40 @@ final class FoldTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48 && !event.modifierFlags.contains(.shift) {
-            // Tab → tabulation réelle (pas des espaces)
-            insertText("\t", replacementRange: selectedRange())
+            // Tab sur titre → fold/unfold, sinon tabulation réelle
+            if !toggleFold(at: selectedRange().location) {
+                insertText("\t", replacementRange: selectedRange())
+            }
         } else {
             super.keyDown(with: event)
         }
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.command) && event.clickCount == 1 {
+            let point      = convert(event.locationInWindow, from: nil)
+            let adjustedPt = NSPoint(x: point.x - textContainerInset.width,
+                                     y: point.y - textContainerInset.height)
+            var fraction: CGFloat = 0
+            let glyph      = layoutManager?.glyphIndex(for: adjustedPt,
+                                                        in: textContainer!,
+                                                        fractionOfDistanceThroughGlyph: &fraction) ?? 0
+            let charIdx    = layoutManager?.characterIndexForGlyph(at: glyph) ?? 0
+            if toggleFold(at: charIdx) { return }
+        }
         super.mouseDown(with: event)
-        if event.clickCount == 2 { toggleFoldAtCursor() }
     }
 
-    private func toggleFoldAtCursor() {
-        guard let storage = textStorage as? MarkdownTextStorage else { return }
-        let charIndex = selectedRange().location
-        let text = string as NSString
-        let lineRange = text.lineRange(for: NSRange(location: charIndex, length: 0))
-        let line = text.substring(with: lineRange)
+    @discardableResult
+    private func toggleFold(at charIndex: Int) -> Bool {
+        guard let storage = textStorage as? MarkdownTextStorage else { return false }
+        let text      = string as NSString
+        let lineRange = text.lineRange(for: NSRange(location: min(charIndex, text.length), length: 0))
+        let line      = text.substring(with: lineRange)
         guard let rxObj = try? NSRegularExpression(pattern: #"^#{1,6}[ \t]"#),
-              rxObj.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) != nil
-        else { return }
+              rxObj.firstMatch(in: line,
+                               range: NSRange(location: 0, length: (line as NSString).length)) != nil
+        else { return false }
         let lineStart = lineRange.location
         if storage.foldedHeadings.contains(lineStart) {
             storage.foldedHeadings.remove(lineStart)
@@ -111,6 +124,7 @@ final class FoldTextView: NSTextView {
         storage.edited(.editedAttributes, range: NSRange(location: 0, length: storage.length), changeInLength: 0)
         storage.processEditing()
         needsDisplay = true
+        return true
     }
 }
 

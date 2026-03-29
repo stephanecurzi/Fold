@@ -169,6 +169,19 @@ struct FoldApp: App {
                     }
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
+                Divider()
+                Button("Effondrer la section") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.foldEnclosingSection()
+                }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+                Button("Tout effondrer") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.foldAllSections()
+                }
+                .keyboardShortcut("e", modifiers: [.command, .option, .shift])
+                Button("Tout déplier") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.unfoldAllSections()
+                }
+                .keyboardShortcut("e", modifiers: [.command, .control])
             }
         }
         Settings {
@@ -268,4 +281,6 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
+
+
 
