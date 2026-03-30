@@ -170,18 +170,31 @@ struct FoldApp: App {
                 }
                 .keyboardShortcut("d", modifiers: [.command, .shift])
                 Divider()
-                Button("Effondrer la section") {
-                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.foldEnclosingSection()
+                Button("Replier la section") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.replierSection()
                 }
-                .keyboardShortcut("e", modifiers: [.command, .option])
-                Button("Tout effondrer") {
-                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.foldAllSections()
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                Button("Déplier la section") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.déplierSection()
                 }
-                .keyboardShortcut("e", modifiers: [.command, .option, .shift])
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                Button("Tout replier") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.replierTout()
+                }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option, .shift])
                 Button("Tout déplier") {
-                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.unfoldAllSections()
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.déplierTout()
                 }
-                .keyboardShortcut("e", modifiers: [.command, .control])
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option, .shift])
+                Divider()
+                Button("Concentration sur la section") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.concentrerSection()
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                Button("Quitter la concentration") {
+                    (NSApp.keyWindow?.firstResponder as? CenteredTextView)?.quitterConcentration()
+                }
+                .keyboardShortcut(.escape, modifiers: [])
             }
         }
         Settings {

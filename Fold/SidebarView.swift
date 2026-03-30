@@ -242,7 +242,7 @@ struct SearchResultRow: View {
             // Nom du fichier
             HStack(spacing: 5) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 11))
+                    .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                 Text(result.fileTitle)
                     .font(.system(size: 13, weight: .medium))
@@ -286,14 +286,14 @@ struct FolderSectionRow: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(.primary)
-                .frame(width: 10)
+                .frame(width: 11)
 
             Image(systemName: "folder")
-                .font(.system(size: 14))
+                .font(.system(size: 15))
                 .foregroundStyle(.primary)
-                .frame(width: 18, alignment: .center)
+                .frame(width: 20, alignment: .center)
 
             Text(folder.name)
                 .font(.system(size: 13, weight: .medium))
@@ -305,7 +305,7 @@ struct FolderSectionRow: View {
             if isHovered {
                 Button(action: onRemove) {
                     Image(systemName: "minus.circle")
-                        .font(.system(size: 14))
+                        .font(.system(size: 16))
                         .foregroundStyle(.primary)
                 }
                 .buttonStyle(.plain)
@@ -344,9 +344,9 @@ struct SidebarDocRow: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "doc.text")
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(isOpenInFocus ? Color.accentColor : .primary)
-                .frame(width: 16, alignment: .center)
+                .frame(width: 20, alignment: .center)
 
             Text(title)
                 .font(.system(size: 13))
@@ -399,9 +399,9 @@ struct TagRowView: View {
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: "at")
-                .font(.system(size: 12, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(.primary)
-                .frame(width: 16, alignment: .center)
+                .frame(width: 20, alignment: .center)
 
             Text(tag)
                 .font(.system(size: 13))
@@ -475,4 +475,5 @@ struct TagColorPicker: View {
         .frame(width: 240)
     }
 }
+
 

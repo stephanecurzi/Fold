@@ -23,6 +23,11 @@ final class MarkdownTextStorage: NSTextStorage {
     var foldedHeadings: Set<Int> = []
     var currentTagColors: [String: String]? = nil
 
+    /// Range visible quand le structural zoom est actif (nil = pas de zoom)
+    var focusedRange: NSRange? = nil
+    /// Titre du heading zoomé — lu par SwiftUI pour le breadcrumb
+    var focusedHeadingTitle: String = ""
+
     /// Position du curseur / sélection courante — mise à jour par le coordinator
     var cursorRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
@@ -80,6 +85,7 @@ final class MarkdownTextStorage: NSTextStorage {
         applyTagCollapse(text: text)
         applyFencedCodeBlocks(text: text)   // En dernier — écrase tout formatage inline à l'intérieur
         applyFolding(text: text)            // Après tout le reste — marque les sections repliées
+        applyFocus(text: text)              // En tout dernier — cache ce qui est hors focus
     }
 
     // MARK: - Block Elements
@@ -447,28 +453,53 @@ final class MarkdownTextStorage: NSTextStorage {
                 backing.addAttribute(.foldHidden, value: kFoldMark, range: hidden)
             }
 
-            // ── Ajoute un paragraphSpacing au titre replié ──────────────────
-            // Donne environ une hauteur de ligne de respiration visuelle sous le titre.
-            let nsText = text as NSString
-            let headingLineRange = nsText.lineRange(
-                for: NSRange(location: foldedStart, length: 0))
-            // On utilise le paragraphStyle existant comme base pour ne pas écraser
-            // le font/color du titre, et on y ajoute juste le spacing.
-            let existing = backing.attribute(.paragraphStyle,
-                                             at: foldedStart,
-                                             effectiveRange: nil) as? NSParagraphStyle
-            let ps = (existing?.mutableCopy() as? NSMutableParagraphStyle)
-                     ?? NSMutableParagraphStyle()
-            ps.paragraphSpacing = fontSize   // ≈ une ligne de corps
-            let titleContentRange = NSRange(location: headingLineRange.location,
-                                            length: max(0, headingLineRange.length - 1))
-            if valid(titleContentRange) {
-                backing.addAttribute(.paragraphStyle, value: ps, range: titleContentRange)
+
+        }
+    }
+
+    // MARK: - Structural Focus
+
+    /// Cache tout ce qui est hors de `focusedRange` en utilisant .foldHidden.
+    private func applyFocus(text: String) {
+        guard let focus = focusedRange else { return }
+        let total = backing.length
+        guard total > 0 else { return }
+
+        // Zone avant la section
+        if focus.location > 0 {
+            let before = NSRange(location: 0, length: focus.location)
+            if valid(before) {
+                backing.addAttribute(.foldHidden, value: kFoldMark, range: before)
+            }
+        }
+        // Zone après la section
+        let afterStart = focus.location + focus.length
+        if afterStart < total {
+            let after = NSRange(location: afterStart, length: total - afterStart)
+            if valid(after) {
+                backing.addAttribute(.foldHidden, value: kFoldMark, range: after)
             }
         }
     }
 
-    // MARK: - Inline helpers
+    /// Calcule le NSRange visible pour un heading donné (ligne du titre + contenu de la section).
+    func sectionRange(forHeadingAt offset: Int, in text: String) -> NSRange? {
+        let nsText = text as NSString
+        let map    = headingMap(for: text)
+        guard let entry = map.first(where: { $0.offset == offset }) else { return nil }
+        let headingLineRange = nsText.lineRange(for: NSRange(location: offset, length: 0))
+        // Fin = début du prochain titre de niveau ≤
+        var sectionEnd = nsText.length
+        if let idx = map.firstIndex(where: { $0.offset == offset }) {
+            for next in map[(idx + 1)...] where next.level <= entry.level {
+                sectionEnd = next.offset
+                break
+            }
+        }
+        let len = sectionEnd - headingLineRange.location
+        guard len > 0 else { return nil }
+        return NSRange(location: headingLineRange.location, length: len)
+    }
 
     private func inline(_ pattern: String, _ text: String, _ range: NSRange,
                         attrs: [NSAttributedString.Key: Any]) {
@@ -667,6 +698,7 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
+
 
 
 

@@ -10,9 +10,10 @@ struct InlineFileView: View {
 
     @State private var isLoaded  = false
     @State private var saveTask: Task<Void, Never>? = nil
+    @State private var focusedTitle: String? = nil
 
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .topLeading) {
             CenteredEditorView(
                 text: $content,
                 maxWidth: 780,
@@ -21,21 +22,35 @@ struct InlineFileView: View {
                 fontSize: prefs.fontSize,
                 fontName: prefs.fontName,
                 tagColors: tagStore.tagColors,
-                tagColorProvider: { tagStore.color(for: $0) }
+                tagColorProvider: { tagStore.color(for: $0) },
+                focusedTitle: $focusedTitle
             )
 
+            if let title = focusedTitle {
+                ConcentrationPill(title: title) { focusedTitle = nil }
+                    .padding(.top, 16)
+                    .padding(.leading, 20)
+                    .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
+                    .zIndex(2)
+            }
+
             if let tag = activeTag {
-                ActiveTagPill(
-                    tag: tag,
-                    color: tagStore.swiftUIColor(for: tag)
-                ) {
-                    withAnimation(.spring(duration: 0.3)) { activeTag = nil }
+                VStack {
+                    Spacer()
+                    ActiveTagPill(
+                        tag: tag,
+                        color: tagStore.swiftUIColor(for: tag)
+                    ) {
+                        withAnimation(.spring(duration: 0.3)) { activeTag = nil }
+                    }
+                    .padding(.bottom, 24)
                 }
-                .padding(.bottom, 24)
+                .frame(maxWidth: .infinity)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(1)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: focusedTitle)
         .animation(.spring(duration: 0.3), value: activeTag)
         .onAppear { load(url) }
         .onChange(of: url) { old, new in
@@ -84,5 +99,6 @@ struct InlineFileView: View {
         try? content.write(to: target, atomically: true, encoding: .utf8)
     }
 }
+
 
 

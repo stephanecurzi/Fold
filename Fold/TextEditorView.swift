@@ -9,8 +9,10 @@ struct TextEditorView: View {
     @Environment(PreferencesStore.self) var prefs
     @Binding var activeTag: String?
 
+    @State private var focusedTitle: String? = nil
+
     var body: some View {
-        ZStack(alignment: .bottom) {
+        ZStack(alignment: .topLeading) {
             CenteredEditorView(
                 text: $document.text,
                 maxWidth: 780,
@@ -19,20 +21,38 @@ struct TextEditorView: View {
                 fontSize: prefs.fontSize,
                 fontName: prefs.fontName,
                 tagColors: tagStore.tagColors,
-                tagColorProvider: { tagStore.color(for: $0) }
+                tagColorProvider: { tagStore.color(for: $0) },
+                focusedTitle: $focusedTitle
             )
-            if let tag = activeTag {
-                ActiveTagPill(
-                    tag: tag,
-                    color: tagStore.swiftUIColor(for: tag)
-                ) {
-                    withAnimation(.spring(duration: 0.3)) { activeTag = nil }
+
+            // Pill de concentration — flottante en haut à gauche, dans la zone texte
+            if let title = focusedTitle {
+                ConcentrationPill(title: title) {
+                    focusedTitle = nil
                 }
-                .padding(.bottom, 24)
+                .padding(.top, 16)
+                .padding(.leading, 20)
+                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
+                .zIndex(2)
+            }
+
+            if let tag = activeTag {
+                VStack {
+                    Spacer()
+                    ActiveTagPill(
+                        tag: tag,
+                        color: tagStore.swiftUIColor(for: tag)
+                    ) {
+                        withAnimation(.spring(duration: 0.3)) { activeTag = nil }
+                    }
+                    .padding(.bottom, 24)
+                }
+                .frame(maxWidth: .infinity)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
                 .zIndex(1)
             }
         }
+        .animation(.easeInOut(duration: 0.18), value: focusedTitle)
         .animation(.spring(duration: 0.3), value: activeTag)
     }
 }
@@ -67,7 +87,32 @@ struct ActiveTagPill: View {
     }
 }
 
-// MARK: - CenteredEditorView
+// MARK: - Pill de concentration flottante
+
+struct ConcentrationPill: View {
+    let title: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        Button(action: onDismiss) {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(title)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(.regularMaterial, in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+            .shadow(color: .black.opacity(0.08), radius: 6, x: 0, y: 2)
+        }
+        .buttonStyle(.plain)
+        .help("Quitter la concentration (Esc ou ⌘↩)")
+    }
+}
 
 struct CenteredEditorView: NSViewRepresentable {
     @Binding var text: String
@@ -78,6 +123,7 @@ struct CenteredEditorView: NSViewRepresentable {
     var fontName: String = "SF Pro Text"
     var tagColors: [String: String] = [:]
     var tagColorProvider: ((String) -> NSColor)? = nil
+    @Binding var focusedTitle: String?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -111,6 +157,9 @@ struct CenteredEditorView: NSViewRepresentable {
         textView.autoresizingMask                     = .width
         textView.delegate = context.coordinator
         context.coordinator.textView = textView
+        context.coordinator.focusedTitleBinding = { title in
+            context.coordinator.parent.focusedTitle = title
+        }
 
         let scroll = NSScrollView()
         scroll.hasVerticalScroller   = true
@@ -147,7 +196,23 @@ struct CenteredEditorView: NSViewRepresentable {
             s.activeTag = activeTag
             let colorsChanged = tagColors != (s.currentTagColors ?? [:])
             s.currentTagColors = tagColors
-            if prefsChanged || tagChanged || colorsChanged {
+
+            // Sync focus : si focusedTitle est nil on efface le zoom
+            let newFocusedRange: NSRange? = focusedTitle == nil ? nil : s.focusedRange
+            let focusChanged = s.focusedRange?.location != newFocusedRange?.location
+                            || s.focusedRange?.length   != newFocusedRange?.length
+            if focusedTitle == nil && s.focusedRange != nil {
+                s.focusedRange = nil
+                s.focusedHeadingTitle = ""
+                // Invalider les glyphes pour forcer la régénération après suppression de .foldHidden
+                if let tv = scroll.documentView as? CenteredTextView {
+                    tv.layoutManager?.invalidateGlyphs(
+                        forCharacterRange: NSRange(location: 0, length: s.length),
+                        changeInLength: 0, actualCharacterRange: nil)
+                }
+            }
+
+            if prefsChanged || tagChanged || colorsChanged || focusChanged {
                 s.beginEditing()
                 s.edited(.editedAttributes, range: NSRange(location: 0, length: s.length), changeInLength: 0)
                 s.endEditing()
@@ -164,6 +229,7 @@ struct CenteredEditorView: NSViewRepresentable {
     class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CenteredEditorView
         weak var textView: CenteredTextView?
+        var focusedTitleBinding: ((String?) -> Void)?
         init(_ p: CenteredEditorView) { parent = p }
 
         func textDidChange(_ n: Notification) {
@@ -478,8 +544,8 @@ final class CenteredTextView: NSTextView {
                 }
                 guard !usedRect.isNull else { continue }
 
-                let pillH = CGFloat(14)
-                let pillW = CGFloat(36)
+                let pillH = CGFloat(12)
+                let pillW = CGFloat(32)
                 let pillX = origin.x + usedRect.maxX + 12
                 let pillY = origin.y + usedRect.midY - pillH / 2 - 2
                 let pillRect = CGRect(x: pillX, y: pillY, width: pillW, height: pillH)
@@ -500,18 +566,58 @@ final class CenteredTextView: NSTextView {
                                                       in: textContainer!,
                                                       fractionOfDistanceThroughGlyph: &fraction) ?? 0
             let charIdx  = layoutManager?.characterIndexForGlyph(at: glyph) ?? 0
-            if toggleFold(at: charIdx) { return }
+            if toggleRepli(at: charIdx) { return }
         }
         super.mouseDown(with: event)
     }
 
-    /// Tab sur une ligne de titre → replie/déplie (familier pour les utilisateurs Folding Text / Bike).
+    // MARK: - Replier / Déplier / Focus
+
     override func keyDown(with event: NSEvent) {
+        let isCmd  = event.modifierFlags.contains(.command)
+        let isOpt  = event.modifierFlags.contains(.option)
+        let isShift = event.modifierFlags.contains(.shift)
+
+        // ⌘↩ — concentration sur la section / quitter si actif
+        if event.keyCode == 36 && isCmd && !isOpt && !isShift {
+            if (textStorage as? MarkdownTextStorage)?.focusedRange != nil {
+                quitterConcentration()
+            } else {
+                concentrerSection()
+            }
+            return
+        }
+
+        // Esc — quitter la concentration
+        if event.keyCode == 53 {
+            if (textStorage as? MarkdownTextStorage)?.focusedRange != nil {
+                quitterConcentration()
+                return
+            }
+        }
+
+        // ⌘⌥↑ — replier la section courante
+        if event.keyCode == 126 && isCmd && isOpt && !isShift {
+            replierSection(); return
+        }
+        // ⌘⌥↓ — déplier la section courante
+        if event.keyCode == 125 && isCmd && isOpt && !isShift {
+            déplierSection(); return
+        }
+        // ⌘⌥⇧↑ — tout replier
+        if event.keyCode == 126 && isCmd && isOpt && isShift {
+            replierTout(); return
+        }
+        // ⌘⌥⇧↓ — tout déplier
+        if event.keyCode == 125 && isCmd && isOpt && isShift {
+            déplierTout(); return
+        }
+
         switch event.keyCode {
         case 48 where !event.modifierFlags.contains(.shift):
-            // Tab : sur titre → fold, sinon → tabulation normale
+            // Tab sur un titre → replier/déplier, sinon tabulation normale
             let charIdx = selectedRange().location
-            if !toggleFold(at: charIdx) {
+            if !toggleRepli(at: charIdx) {
                 insertText("\t", replacementRange: selectedRange())
             }
         case 36:
@@ -521,10 +627,9 @@ final class CenteredTextView: NSTextView {
         }
     }
 
-    /// Tente de replier/déplier la section du titre à `charIndex`.
-    /// Retourne `true` si on était bien sur un titre.
+    /// Tente de replier/déplier le titre à `charIndex`. Retourne `true` si on était sur un titre.
     @discardableResult
-    private func toggleFold(at charIndex: Int) -> Bool {
+    private func toggleRepli(at charIndex: Int) -> Bool {
         guard let storage = textStorage as? MarkdownTextStorage else { return false }
         let text      = string as NSString
         let lineRange = text.lineRange(for: NSRange(location: min(charIndex, text.length), length: 0))
@@ -549,10 +654,66 @@ final class CenteredTextView: NSTextView {
         return true
     }
 
-    // MARK: - Fold curseur-centré
+    // MARK: - Structural zoom
 
-    /// Replie/déplie la section qui contient le curseur, quel que soit l'endroit dans la section.
-    func foldEnclosingSection() {
+    func concentrerSection() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        let charIndex = selectedRange().location
+        let map = storage.headingMap(for: storage.string)
+        guard let heading = map.last(where: { $0.offset <= charIndex }) else { return }
+
+        guard let range = storage.sectionRange(forHeadingAt: heading.offset,
+                                                in: storage.string) else { return }
+        let nsText = storage.string as NSString
+        let headingLine = nsText.lineRange(for: NSRange(location: heading.offset, length: 0))
+        var title = nsText.substring(with: headingLine)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        title = title.replacingOccurrences(of: "^#{1,6}\\s*", with: "",
+                                            options: .regularExpression)
+
+        storage.focusedRange        = range
+        storage.focusedHeadingTitle = title
+        refreshStorage(storage: storage)
+
+        DispatchQueue.main.async { [weak self] in
+            self?.scrollRangeToVisible(NSRange(location: range.location, length: 0))
+        }
+        if let coordinator = delegate as? CenteredEditorView.Coordinator {
+            DispatchQueue.main.async {
+                coordinator.parent.focusedTitle = title
+            }
+        }
+    }
+
+    func quitterConcentration() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        guard storage.focusedRange != nil else { return }
+        storage.focusedRange        = nil
+        storage.focusedHeadingTitle = ""
+        refreshStorage(storage: storage)
+        if let coordinator = delegate as? CenteredEditorView.Coordinator {
+            DispatchQueue.main.async {
+                coordinator.parent.focusedTitle = nil
+            }
+        }
+    }
+
+    private func refreshStorage(storage: MarkdownTextStorage) {
+        storage.beginEditing()
+        storage.edited(.editedAttributes,
+                       range: NSRange(location: 0, length: storage.length),
+                       changeInLength: 0)
+        storage.endEditing()
+        // Force la régénération des glyphes — sans ça, les glyphes .null
+        // issus de .foldHidden restent en cache même après suppression de l'attribut.
+        layoutManager?.invalidateGlyphs(
+            forCharacterRange: NSRange(location: 0, length: storage.length),
+            changeInLength: 0, actualCharacterRange: nil)
+        needsDisplay = true
+    }
+
+    /// Replie la section courante si dépliée, la déplie si repliée.
+    func replierSection() {
         guard let storage = textStorage as? MarkdownTextStorage else { return }
         let charIndex = selectedRange().location
         let map = storage.headingMap(for: storage.string)
@@ -565,15 +726,25 @@ final class CenteredTextView: NSTextView {
         refreshFolding(storage: storage)
     }
 
+    /// Déplie uniquement la section courante.
+    func déplierSection() {
+        guard let storage = textStorage as? MarkdownTextStorage else { return }
+        let charIndex = selectedRange().location
+        let map = storage.headingMap(for: storage.string)
+        guard let heading = map.last(where: { $0.offset <= charIndex }) else { return }
+        storage.foldedHeadings.remove(heading.offset)
+        refreshFolding(storage: storage)
+    }
+
     /// Replie tous les titres du document.
-    func foldAllSections() {
+    func replierTout() {
         guard let storage = textStorage as? MarkdownTextStorage else { return }
         storage.foldedHeadings = Set(storage.headingMap(for: storage.string).map { $0.offset })
         refreshFolding(storage: storage)
     }
 
     /// Déplie tous les titres du document.
-    func unfoldAllSections() {
+    func déplierTout() {
         guard let storage = textStorage as? MarkdownTextStorage else { return }
         storage.foldedHeadings.removeAll()
         refreshFolding(storage: storage)
@@ -652,7 +823,7 @@ final class FoldLayoutManager: NSLayoutManager {
         }
     }
 
-    // MARK: - Indicateur inline — badge compact
+    // MARK: - Indicateur inline — même design que ConcentrationPill
 
     private func drawInlineFoldIndicators(storage: MarkdownTextStorage,
                                           charRange: NSRange,
@@ -661,8 +832,6 @@ final class FoldLayoutManager: NSLayoutManager {
         let nsText = text as NSString
         let map    = storage.headingMap(for: text)
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-
-        let pillBg = NSColor.controlAccentColor
 
         for foldedStart in storage.foldedHeadings {
             guard foldedStart < storage.length else { continue }
@@ -682,33 +851,35 @@ final class FoldLayoutManager: NSLayoutManager {
             }
             guard !usedRect.isNull else { continue }
 
-            // Pill : largeur fixe, 3 cercles dessinés
-            let pillH: CGFloat = 14
-            let pillW: CGFloat = 36
+            // Pill 12 × 32 px, coins parfaitement ronds (rayon = moitié hauteur)
+            let pillH: CGFloat = 12
+            let pillW: CGFloat = 32
             let pillR: CGFloat = pillH / 2
 
             let pillX = origin.x + usedRect.maxX + 12
-            let pillY = origin.y + usedRect.midY - pillH / 2 - 2   // -2 px pour aligner sur baseline
+            let pillY = origin.y + usedRect.midY - pillH / 2 - 2
             let pillRect = CGRect(x: pillX, y: pillY, width: pillW, height: pillH)
             let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillR, yRadius: pillR)
 
-            pillBg.setFill()
+            // Fond : teinte accent légère — propre, pas dépendant du material OS
+            let accent = NSColor.controlAccentColor
+            accent.withAlphaComponent(isDark ? 0.18 : 0.12).setFill()
             pillPath.fill()
 
-            // 3 cercles dessinés à la main — parfaitement centrés dans la pill
-            let dotR:     CGFloat = 2.0
-            let dotSpacing: CGFloat = 6.0
-            let totalW  = dotR * 2 * 3 + dotSpacing * 2
-            let dotStartX = pillRect.midX - totalW / 2 + dotR
-            let dotY      = pillRect.midY   // centre vertical exact
+            // Bord : accent un peu plus saturé
+            pillPath.lineWidth = 0.5
+            accent.withAlphaComponent(isDark ? 0.45 : 0.35).setStroke()
+            pillPath.stroke()
 
+            // Dots : couleur accent
+            let dotR: CGFloat = 1.5
+            let gap:  CGFloat = 4.5
+            accent.withAlphaComponent(isDark ? 0.80 : 0.65).setFill()
             for i in 0..<3 {
-                let cx = dotStartX + CGFloat(i) * (dotR * 2 + dotSpacing)
-                let dotRect = CGRect(x: cx - dotR, y: dotY - dotR,
+                let cx = pillRect.midX + CGFloat(i - 1) * (dotR * 2 + gap)
+                let dotRect = CGRect(x: cx - dotR, y: pillRect.midY - dotR,
                                      width: dotR * 2, height: dotR * 2)
-                let dot = NSBezierPath(ovalIn: dotRect)
-                NSColor.white.setFill()
-                dot.fill()
+                NSBezierPath(ovalIn: dotRect).fill()
             }
         }
     }
