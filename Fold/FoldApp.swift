@@ -50,7 +50,7 @@ struct FoldApp: App {
 
     init() {
         NSWindow.allowsAutomaticWindowTabbing = false
-        _ = RawTextWindowController.shared  // force l'init du singleton
+        _ = RawTextWindowController.shared
     }
 
     var body: some Scene {
@@ -242,17 +242,25 @@ struct FoldApp: App {
         tv.insertText(before + selected + after, replacementRange: sel)
     }
 
+    // 🔵 FIX: le remplacement est désormais limité au début de ligne (indentation optionnelle).
+    //         L'ancienne version remplaçait toutes les occurrences de "- [x] " dans la ligne,
+    //         y compris dans le texte (ex. "voir - [x] pour référence").
     private func toggleCheckbox() {
         guard let tv = NSApp.keyWindow?.firstResponder as? NSTextView else { return }
         let sel = tv.selectedRange()
         let str = tv.string as NSString
         let lineRange = str.lineRange(for: sel)
         let line = str.substring(with: lineRange)
+        let nsLine = line as NSString
+        let lr = NSRange(location: 0, length: nsLine.length)
+
         let toggled: String
-        if line.contains("- [x] ") {
-            toggled = line.replacingOccurrences(of: "- [x] ", with: "- [ ] ")
-        } else if line.contains("- [ ] ") {
-            toggled = line.replacingOccurrences(of: "- [ ] ", with: "- [x] ")
+        if let m = (try? NSRegularExpression(pattern: #"^(\s*)- \[x\] "#))?.firstMatch(in: line, range: lr) {
+            let indent = nsLine.substring(with: m.range(at: 1))
+            toggled = (line as NSString).replacingCharacters(in: m.range, with: "\(indent)- [ ] ")
+        } else if let m = (try? NSRegularExpression(pattern: #"^(\s*)- \[ \] "#))?.firstMatch(in: line, range: lr) {
+            let indent = nsLine.substring(with: m.range(at: 1))
+            toggled = (line as NSString).replacingCharacters(in: m.range, with: "\(indent)- [x] ")
         } else {
             toggled = "- [ ] " + line
         }
@@ -273,7 +281,7 @@ struct FoldApp: App {
         let inlinePatterns: [(String, String)] = [
             ("\\*\\*\\*(.+?)\\*\\*\\*", "$1"), ("___(.+?)___", "$1"),
             ("\\*\\*(.+?)\\*\\*", "$1"),        ("__(.+?)__", "$1"),
-            ("(?<!`)`(?!`)([^`\\n]+)(?<!`)`(?!`)", "$1"),
+            ("(?<![`])`(?![`])([^`\\n]+)(?<![`])`(?![`])", "$1"),
             ("\\*([^*\\n]+)\\*", "$1"),          ("_([^_\\n]+)_", "$1"),
             ("~~(.+?)~~", "$1"),                 ("==(.+?)==", "$1"),
         ]
@@ -294,6 +302,4 @@ struct FoldApp: App {
         tv.insertText(text, replacementRange: sel)
     }
 }
-
-
 

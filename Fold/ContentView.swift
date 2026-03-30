@@ -50,7 +50,7 @@ struct ContentView: View {
             openWikiLink(title: title)
         }
         .onReceive(NotificationCenter.default.publisher(for: .foldFocusSearch)) { _ in
-            // Handled in SidebarView via the same notification
+            // Géré dans SidebarView via la même notification
         }
     }
 
@@ -58,7 +58,6 @@ struct ContentView: View {
 
     private func openWikiLink(title: String) {
         let lower = title.lowercased()
-        // Cherche dans tous les dossiers ouverts
         for folder in folderStore.folders {
             if let match = folder.documents.first(where: {
                 $0.title.lowercased() == lower
@@ -75,13 +74,17 @@ struct ContentView: View {
                 return
             }
         }
-        // Aucun fichier trouvé — on l'indique brièvement dans la barre titre
-        NSApp.keyWindow?.title = "« \(title) » introuvable"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            NSApp.keyWindow?.title = "Fold"
+
+        // 🔵 FIX: on capture la fenêtre courante et son titre original avant le délai.
+        //         L'ancienne version pouvait restaurer le titre sur la mauvaise fenêtre
+        //         et hardcodait "Fold" au lieu du nom du fichier ouvert.
+        if let window = NSApp.keyWindow {
+            let originalTitle = window.title
+            window.title = "« \(title) » introuvable"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak window] in
+                window?.title = originalTitle
+            }
         }
     }
 }
-
-
 

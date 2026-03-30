@@ -27,9 +27,17 @@ final class TagStore {
 
     // MARK: - Extraction @tags en fin de phrase/ligne
 
+    // 🟠 FIX: regex compilée une seule fois (était recompilée à chaque appel,
+    //         y compris à chaque frappe via ContentView.onChange(document.text)).
+    private static let tagExtractRegex: NSRegularExpression? = {
+        try? NSRegularExpression(
+            pattern: #"@(\w+)(?=\s*[.!?]?\s*$)"#,
+            options: [.anchorsMatchLines]
+        )
+    }()
+
     static func extract(from content: String) -> [String] {
-        let pattern = #"@(\w+)(?=\s*[.!?]?\s*$)"#
-        guard let rx = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return [] }
+        guard let rx = tagExtractRegex else { return [] }
         let range = NSRange(content.startIndex..., in: content)
         let matches = rx.matches(in: content, range: range)
         return Array(Set(matches.compactMap { m -> String? in
@@ -71,21 +79,17 @@ final class TagStore {
         Color(nsColor: color(for: tag))
     }
 
-    /// Enregistre la couleur d'un tag. C'est le seul endroit où un tag
-    /// personnalisé est créé — uniquement quand l'utilisateur choisit une couleur.
     func setColor(_ hex: String, for tag: String) {
         tagColors[tag] = hex
         save()
     }
 
-    /// Réinitialise une étiquette par défaut à sa couleur d'origine.
     func resetToDefault(_ tag: String) {
         guard let original = defaultTags[tag] else { return }
         tagColors[tag] = original
         save()
     }
 
-    /// Supprime une étiquette personnalisée.
     func removeTag(_ tag: String) {
         guard !isDefault(tag) else { return }
         tagColors.removeValue(forKey: tag)

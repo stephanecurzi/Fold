@@ -1,11 +1,3 @@
-//
-//  SearchStore.swift
-//  Fold
-//
-//  Created by Stephane Curzi on 2026-03-19.
-//
-
-
 import Foundation
 import AppKit
 import Observation
@@ -20,7 +12,6 @@ final class SearchStore {
     var matchCount: Int = 0
     var currentMatch: Int = 0
 
-    // Référence faible au NSTextView courant
     weak var textView: NSTextView?
 
     // MARK: - Recherche
@@ -34,7 +25,6 @@ final class SearchStore {
 
         var found = text.range(of: query, options: options, range: searchRange)
 
-        // Wrap around
         if found.location == NSNotFound {
             searchRange = NSRange(location: 0, length: text.length)
             found = text.range(of: query, options: options, range: searchRange)
@@ -58,7 +48,6 @@ final class SearchStore {
         var searchRange = NSRange(location: 0, length: endAt)
         var found = text.range(of: query, options: options, range: searchRange)
 
-        // Wrap around
         if found.location == NSNotFound {
             searchRange = NSRange(location: 0, length: text.length)
             found = text.range(of: query, options: options, range: searchRange)
@@ -88,13 +77,13 @@ final class SearchStore {
     func replaceAll() {
         guard !query.isEmpty, let tv = textView else { return }
         let options: NSString.CompareOptions = isCaseSensitive ? [] : .caseInsensitive
-        var result = tv.string
-        let range = result.startIndex..<result.endIndex
-        if isCaseSensitive {
-            result = result.replacingOccurrences(of: query, with: replacement, options: options, range: range)
-        } else {
-            result = result.replacingOccurrences(of: query, with: replacement, options: options, range: range)
-        }
+        // 🟡 FIX: les deux branches étaient identiques — simplifié en un seul appel.
+        let result = tv.string.replacingOccurrences(
+            of: query,
+            with: replacement,
+            options: options,
+            range: tv.string.startIndex..<tv.string.endIndex
+        )
         tv.string = result
         tv.didChangeText()
         updateMatchCount()
@@ -121,3 +110,4 @@ final class SearchStore {
         tv.setSelectedRange(NSRange(location: 0, length: 0))
     }
 }
+

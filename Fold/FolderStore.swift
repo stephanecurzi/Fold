@@ -5,8 +5,10 @@ import Observation
 private let readableExtensions = ["md", "txt", "text", "markdown", "mdown", "mkd", "rst", "fountain", "tex", "org"]
 private let bookmarksKey = "fold.folderBookmarks"
 
+// 🔴 FIX: id dérivé de fileURL (stable) au lieu d'un UUID() recréé chaque seconde.
+//         SwiftUI ne re-rend plus toute la liste à chaque tick du timer.
 struct FolderItem: Identifiable, Equatable {
-    let id: UUID
+    var id: URL { fileURL }
     let title: String
     let content: String
     let fileURL: URL
@@ -31,8 +33,15 @@ final class FolderStore {
     private var openAccesses: [URL: Bool] = [:]
     private var timer: Timer?
 
-    // Injecté depuis FoldApp
-    var recentStore: RecentStore? = nil
+    // 🔵 FIX: didSet alimente recentStore avec les dossiers déjà chargés
+    //         (restorePersistedFolders s'exécute avant que recentStore soit injecté).
+    var recentStore: RecentStore? = nil {
+        didSet {
+            guard let rs = recentStore else { return }
+            let allURLs = folders.flatMap { $0.documents.map { $0.fileURL } }
+            if !allURLs.isEmpty { rs.addAll(allURLs) }
+        }
+    }
 
     init() {
         restorePersistedFolders()
@@ -44,8 +53,6 @@ final class FolderStore {
     func addFolder(url: URL) {
         openAccess(url: url)
         let docs = loadDocuments(from: url)
-
-        // Injecte tous les fichiers du dossier dans notre liste de récents
         recentStore?.addAll(docs.map { $0.fileURL })
 
         if let idx = folders.firstIndex(where: { $0.url == url }) {
@@ -116,6 +123,8 @@ final class FolderStore {
             openAccess(url: url)
             folders.append(OpenFolder(id: UUID(), url: url, documents: loadDocuments(from: url)))
         }
+        // Note : recentStore est nil ici (injecté plus tard depuis FoldApp).
+        //        L'alimentation des récents se fait dans le didSet de recentStore.
     }
 
     // MARK: - Chargement
@@ -134,8 +143,8 @@ final class FolderStore {
                       let attrs   = try? fileURL.resourceValues(forKeys: [.contentModificationDateKey]),
                       let date    = attrs.contentModificationDate
                 else { return nil }
+                // 🔴 FIX: plus de UUID() ici — id est dérivé de fileURL
                 return FolderItem(
-                    id: UUID(),
                     title: fileURL.deletingPathExtension().lastPathComponent,
                     content: content,
                     fileURL: fileURL,
@@ -145,5 +154,4 @@ final class FolderStore {
             .sorted { $0.updatedAt > $1.updatedAt }
     }
 }
-
 

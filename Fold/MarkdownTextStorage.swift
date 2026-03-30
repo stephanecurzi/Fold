@@ -31,6 +31,12 @@ final class MarkdownTextStorage: NSTextStorage {
     /// Position du curseur / sélection courante — mise à jour par le coordinator
     var cursorRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
+    // 🟠 FIX: cache pour la largeur du tab — évite de recréer un stack NSTextStorage
+    //         + NSLayoutManager + NSTextContainer complets à chaque frappe.
+    //         La valeur n'est recalculée que si la police change.
+    private var _cachedTabWidth: CGFloat = 0
+    private var _cachedTabFontKey: String = ""
+
     // MARK: - Fonts
 
     private var fontSize: CGFloat { preferences?.fontSize ?? 18 }
@@ -46,10 +52,36 @@ final class MarkdownTextStorage: NSTextStorage {
         backing.attributes(at: location, effectiveRange: range)
     }
 
+    // 🔴 FIX: ajuste les offsets de foldedHeadings et focusedRange quand du texte est
+    //         inséré ou supprimé. Sans ça, les offsets stockés pointent vers le mauvais
+    //         endroit dès que l'utilisateur tape avant un titre replié.
     override func replaceCharacters(in range: NSRange, with str: String) {
+        let delta = (str as NSString).length - range.length
         beginEditing()
         backing.replaceCharacters(in: range, with: str)
-        edited(.editedCharacters, range: range, changeInLength: (str as NSString).length - range.length)
+        edited(.editedCharacters, range: range, changeInLength: delta)
+
+        if delta != 0 && !foldedHeadings.isEmpty {
+            foldedHeadings = Set(foldedHeadings.compactMap { offset -> Int? in
+                if offset < range.location { return offset }                      // avant la modification → inchangé
+                if offset < range.location + range.length { return nil }          // dans la zone supprimée → retiré
+                return offset + delta                                              // après → décalé
+            })
+        }
+
+        if let f = focusedRange {
+            if f.location + f.length <= range.location {
+                // focusedRange entièrement avant la modification → inchangé
+            } else if f.location >= range.location + range.length {
+                // focusedRange entièrement après → décalé
+                focusedRange = NSRange(location: f.location + delta, length: f.length)
+            } else {
+                // focusedRange chevauche la modification → on quitte le zoom
+                focusedRange        = nil
+                focusedHeadingTitle = ""
+            }
+        }
+
         endEditing()
     }
 
@@ -158,10 +190,9 @@ final class MarkdownTextStorage: NSTextStorage {
         }
 
         // ── Liste de tâches ────────────────────────────
-        // Testée AVANT la liste non ordonnée
         if let m = rx(#"^(\s*)(- \[([ x])\] )(.*)"#).firstMatch(in: line, range: lineRange) {
             let indentLen  = m.range(at: 1).length
-            let prefix     = nsLine.substring(with: m.range(at: 2)) // "- [ ] " ou "- [x] "
+            let prefix     = nsLine.substring(with: m.range(at: 2))
             let isDone     = nsLine.substring(with: m.range(at: 3)) == "x"
             let textRange  = NSRange(location: offset + m.range(at: 4).location,
                                      length: m.range(at: 4).length)
@@ -171,8 +202,6 @@ final class MarkdownTextStorage: NSTextStorage {
             backing.addAttribute(.paragraphStyle, value: ps, range: absLineRange)
             backing.addAttribute(.foregroundColor, value: NSColor.labelColor,
                                  range: NSRange(location: offset + indentLen, length: m.range(at: 2).length))
-
-            // Ligne complétée → texte barré + couleur tertiaire
             if isDone && valid(textRange) {
                 backing.addAttributes([
                     .strikethroughStyle: NSUnderlineStyle.single.rawValue,
@@ -212,16 +241,13 @@ final class MarkdownTextStorage: NSTextStorage {
                                                 length: m.range(at: 2).length))
             return
         }
-
     }
 
-    /// Mesure la largeur réelle d'une chaîne avec le body font courant.
     private func measuredWidth(_ string: String) -> CGFloat {
         let attrs: [NSAttributedString.Key: Any] = [.font: bodyFont]
         return (string as NSString).size(withAttributes: attrs).width
     }
 
-    /// Crée un paragraphStyle avec hanging indent propre pour les listes.
     private func listParagraphStyle(firstLine: CGFloat, wrapped: CGFloat) -> NSParagraphStyle {
         let ps = NSMutableParagraphStyle()
         ps.firstLineHeadIndent = firstLine
@@ -356,27 +382,19 @@ final class MarkdownTextStorage: NSTextStorage {
         let lines = text.components(separatedBy: "\n")
         var offset = 0
 
-        // Mesure la position réelle du premier caractère après un tab
-        // en faisant un vrai layout — correspond exactement au tab stop d'AppKit
-        let ts = NSTextStorage(string: "\tX")
-        ts.addAttribute(.font, value: monoFont, range: NSRange(location: 0, length: 2))
-        let lm = NSLayoutManager()
-        let tc = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude,
-                                              height: CGFloat.greatestFiniteMagnitude))
-        ts.addLayoutManager(lm)
-        lm.addTextContainer(tc)
-        lm.ensureLayout(for: tc)
-        let tabWidth = lm.location(forGlyphAt: 1).x
+        // 🟠 FIX: la largeur du tab est mise en cache par clé police+taille.
+        //         Avant ce fix, un NSTextStorage + NSLayoutManager + NSTextContainer
+        //         étaient recréés entièrement à chaque frappe, pour un résultat constant.
+        let tabW = cachedTabWidth()
 
         let codePs: NSParagraphStyle = {
             let ps = NSMutableParagraphStyle()
             ps.lineSpacing      = 3
             ps.paragraphSpacing = 2
-            ps.headIndent       = tabWidth   // lignes wrappées alignées après le tab
+            ps.headIndent       = tabW
             return ps
         }()
 
-        // Une ligne commençant par tab = code, sauf si c'est un item de liste
         for line in lines {
             let lineLen  = (line as NSString).length
             let absRange = NSRange(location: offset, length: lineLen)
@@ -401,9 +419,27 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
+    /// Retourne la largeur réelle d'un tab en points, mise en cache par clé police.
+    private func cachedTabWidth() -> CGFloat {
+        let fontKey = "\(monoFont.fontName)-\(monoFont.pointSize)"
+        if _cachedTabWidth > 0 && _cachedTabFontKey == fontKey {
+            return _cachedTabWidth
+        }
+        let ts = NSTextStorage(string: "\tX")
+        ts.addAttribute(.font, value: monoFont, range: NSRange(location: 0, length: 2))
+        let lm = NSLayoutManager()
+        let tc = NSTextContainer(size: CGSize(width: CGFloat.greatestFiniteMagnitude,
+                                              height: CGFloat.greatestFiniteMagnitude))
+        ts.addLayoutManager(lm)
+        lm.addTextContainer(tc)
+        lm.ensureLayout(for: tc)
+        _cachedTabWidth   = lm.location(forGlyphAt: 1).x
+        _cachedTabFontKey = fontKey
+        return _cachedTabWidth
+    }
+
     // MARK: - Section Folding
 
-    /// Construit une carte (offset, niveau) de tous les titres du texte.
     func headingMap(for text: String) -> [(offset: Int, level: Int)] {
         var map: [(offset: Int, level: Int)] = []
         var offset = 0
@@ -418,15 +454,12 @@ final class MarkdownTextStorage: NSTextStorage {
         return map
     }
 
-    /// Retourne la plage de caractères à cacher pour un titre replié donné.
     func foldedRange(for headingOffset: Int, level: Int,
                      text: String, map: [(offset: Int, level: Int)]) -> NSRange? {
         let nsText = text as NSString
         let lineRange = nsText.lineRange(for: NSRange(location: headingOffset, length: 0))
-        // La section commence juste après le \n du titre
         let sectionStart = lineRange.location + lineRange.length
         guard sectionStart < nsText.length else { return nil }
-        // Fin = début du prochain titre de niveau ≤ au titre courant
         var sectionEnd = nsText.length
         if let idx = map.firstIndex(where: { $0.offset == headingOffset }) {
             for next in map[(idx + 1)...] where next.level <= level {
@@ -446,33 +479,27 @@ final class MarkdownTextStorage: NSTextStorage {
             guard foldedStart < backing.length else { continue }
             guard let entry = map.first(where: { $0.offset == foldedStart }) else { continue }
 
-            // ── Marque le contenu caché ─────────────────────────────────────
             if let hidden = foldedRange(for: foldedStart, level: entry.level,
                                         text: text, map: map),
                valid(hidden) {
                 backing.addAttribute(.foldHidden, value: kFoldMark, range: hidden)
             }
-
-
         }
     }
 
     // MARK: - Structural Focus
 
-    /// Cache tout ce qui est hors de `focusedRange` en utilisant .foldHidden.
     private func applyFocus(text: String) {
         guard let focus = focusedRange else { return }
         let total = backing.length
         guard total > 0 else { return }
 
-        // Zone avant la section
         if focus.location > 0 {
             let before = NSRange(location: 0, length: focus.location)
             if valid(before) {
                 backing.addAttribute(.foldHidden, value: kFoldMark, range: before)
             }
         }
-        // Zone après la section
         let afterStart = focus.location + focus.length
         if afterStart < total {
             let after = NSRange(location: afterStart, length: total - afterStart)
@@ -482,13 +509,11 @@ final class MarkdownTextStorage: NSTextStorage {
         }
     }
 
-    /// Calcule le NSRange visible pour un heading donné (ligne du titre + contenu de la section).
     func sectionRange(forHeadingAt offset: Int, in text: String) -> NSRange? {
         let nsText = text as NSString
         let map    = headingMap(for: text)
         guard let entry = map.first(where: { $0.offset == offset }) else { return nil }
         let headingLineRange = nsText.lineRange(for: NSRange(location: offset, length: 0))
-        // Fin = début du prochain titre de niveau ≤
         var sectionEnd = nsText.length
         if let idx = map.firstIndex(where: { $0.offset == offset }) {
             for next in map[(idx + 1)...] where next.level <= entry.level {
@@ -599,7 +624,6 @@ final class MarkdownTextStorage: NSTextStorage {
     }
 
     private func inlineWikiLinks(_ text: String, _ full: NSRange) {
-        // Regex : [[titre]] — on évite les raw strings pour contrôler l'échappement
         guard let wikiRx = try? NSRegularExpression(pattern: "\\[\\[([^\\]\n]+)\\]\\]") else { return }
         wikiRx.enumerateMatches(in: text, range: full) { [weak self] m, _, _ in
             guard let self, let m else { return }
@@ -698,7 +722,4 @@ final class MarkdownTextStorage: NSTextStorage {
         return [.font: bodyFont, .foregroundColor: NSColor.labelColor, .paragraphStyle: s]
     }
 }
-
-
-
 

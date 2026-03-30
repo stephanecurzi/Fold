@@ -15,11 +15,17 @@ struct SidebarView: View {
     @State private var globalSearch = GlobalSearchStore()
     @State private var searchQuery: String = ""
 
+    // 🔵 FIX: searchFocused remplace l'ancienne tentative d'accéder au NSSearchField
+    //         de la toolbar via NSToolbarItem.view (qui ne fonctionnait pas de façon fiable).
+    //         Requiert macOS 14, cohérent avec l'usage de @Observable dans ce projet.
+    @FocusState private var isSearchFocused: Bool
+
     private var isSearching: Bool { !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty }
 
     var body: some View {
         contentView
             .searchable(text: $searchQuery, placement: .sidebar, prompt: "Rechercher…")
+            .searchFocused($isSearchFocused)
             .onChange(of: searchQuery) { _, q in
                 globalSearch.query = q
                 if q.isEmpty {
@@ -45,14 +51,10 @@ struct SidebarView: View {
                 globalSearch.bind(to: folderStore)
             }
             .onReceive(windowPublisher) { _ in refreshOpenURLs() }
-        .onReceive(NotificationCenter.default.publisher(for: .foldFocusSearch)) { _ in
-            // Déclenche le champ de recherche natif
-            NSApp.keyWindow?.toolbar?.visibleItems?.forEach { item in
-                if let searchField = item.view as? NSSearchField {
-                    searchField.becomeFirstResponder()
-                }
+            // 🔵 FIX: utilise searchFocused au lieu de parcourir les NSToolbarItems.
+            .onReceive(NotificationCenter.default.publisher(for: .foldFocusSearch)) { _ in
+                isSearchFocused = true
             }
-        }
     }
 
     @ViewBuilder
@@ -132,7 +134,6 @@ struct SidebarView: View {
         }
     }
 
-
     private var windowPublisher: AnyPublisher<Notification, Never> {
         let nc = NotificationCenter.default
         let a = nc.publisher(for: NSWindow.didBecomeKeyNotification)
@@ -164,7 +165,6 @@ struct GlobalSearchResultsView: View {
     let query: String
     let openDocumentURLs: Set<URL>
 
-    // Un seul résultat par fichier (le premier match)
     private var firstByFile: [GlobalSearchResult] {
         var seen = Set<URL>()
         return store.results.filter { seen.insert($0.fileURL).inserted }
@@ -216,6 +216,9 @@ struct GlobalSearchResultsView: View {
 
         if let existing = NSDocumentController.shared.document(for: url) {
             existing.showWindows()
+            // 🔵 NOTE: délai empirique — la fenêtre doit être key avant le jump.
+            //          Une approche plus robuste nécessiterait un callback de readiness
+            //          depuis TextEditorView (refactoring plus lourd).
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { jump() }
             return
         }
@@ -226,6 +229,8 @@ struct GlobalSearchResultsView: View {
                 return
             }
             doc?.showWindows()
+            // 🔵 NOTE: délai plus long pour laisser le temps au document de charger
+            //          et à la fenêtre de devenir key. Même remarque que ci-dessus.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { jump() }
         }
     }
@@ -239,7 +244,6 @@ struct SearchResultRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            // Nom du fichier
             HStack(spacing: 5) {
                 Image(systemName: "doc.text")
                     .font(.system(size: 13))
@@ -249,8 +253,6 @@ struct SearchResultRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
             }
-
-            // Extrait avec le mot en couleur
             highlightedExcerpt
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -475,5 +477,4 @@ struct TagColorPicker: View {
         .frame(width: 240)
     }
 }
-
 
