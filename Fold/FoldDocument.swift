@@ -14,9 +14,6 @@ final class FoldDocument: ReferenceFileDocument, ObservableObject {
          UTType(filenameExtension: "txt")       ?? .plainText,
          UTType(filenameExtension: "text")      ?? .plainText,
          UTType(filenameExtension: "markdown")  ?? .plainText,
-         UTType(filenameExtension: "fountain")  ?? .plainText,
-         UTType(filenameExtension: "rst")       ?? .plainText,
-         UTType(filenameExtension: "org")       ?? .plainText,
         ]
     }
 

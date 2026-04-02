@@ -526,7 +526,6 @@ final class CenteredTextView: NSTextView {
            !storage.foldedHeadings.isEmpty {
 
             let text   = storage.string as NSString
-            let map    = storage.headingMap(for: storage.string)
             let origin = lm.textContainers.first.map { _ in textContainerOrigin } ?? .zero
 
             for foldedStart in storage.foldedHeadings {
@@ -942,7 +941,5 @@ final class FoldLayoutManager: NSLayoutManager {
         drawBar(rect: groupRect)
     }
 }
-
-
 
 
